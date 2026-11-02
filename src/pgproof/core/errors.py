@@ -81,3 +81,10 @@ class LoadError(RuntimeError):
 def _display(value: Any) -> str:
     text = repr(value)
     return text if len(text) <= 80 else text[:77] + "..."
+
+
+class RepairError(RuntimeError):
+    def __init__(self, invariant_id: str, message: str) -> None:
+        self.invariant_id = invariant_id
+        self.message = message
+        super().__init__(f"repair {invariant_id} failed: {message}")

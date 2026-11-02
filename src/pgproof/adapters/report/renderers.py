@@ -38,6 +38,7 @@ class HtmlRenderer:
             f"<li>{html.escape(item)}</li>" for item in report.limitations
         )
         verdict_class = "pass" if report.verdict == "PASS" else "fail"
+        repairs_block = _repairs_block(report)
 
         return f"""<!doctype html>
 <html lang="en">
@@ -120,6 +121,8 @@ class HtmlRenderer:
     </tbody>
   </table>
 
+  {repairs_block}
+
   {f'<h2>Failures</h2>{failures}' if failures else ''}
 
   <h2>Not verified</h2>
@@ -167,4 +170,23 @@ def _failure_block(result: InvariantResult) -> str:
         f"<h3><code>{html.escape(result.id)}</code></h3>"
         f"<p>{html.escape(result.description)} — <strong>{result.violations}</strong> violating rows.</p>"
         f"<pre><code>{html.escape(sample)}</code></pre>"
+    )
+
+
+def _repairs_block(report: Report) -> str:
+    repairs = report.repairs
+    if not repairs or not repairs.actions:
+        return ""
+    rows = "\n".join(
+        f"<tr><td><code>{html.escape(action.id)}</code></td>"
+        f"<td>{action.pass_number}</td><td>{action.before}</td>"
+        f"<td>{action.after}</td><td>{action.rows_affected}</td></tr>"
+        for action in repairs.actions
+    )
+    return (
+        "<h2>Repairs</h2>"
+        f"<p>{repairs.applied} rows affected across {repairs.passes} pass(es); "
+        f"residual violations: <strong>{repairs.residual}</strong>.</p>"
+        "<table><thead><tr><th>Rule</th><th>Pass</th><th>Before</th>"
+        f"<th>After</th><th>Rows</th></tr></thead><tbody>{rows}</tbody></table>"
     )

@@ -14,6 +14,7 @@ import ast
 from pathlib import Path
 
 from pgproof.adapters.postgres.query_runner import PostgresQueryRunner
+from pgproof.adapters.postgres.sql_executor import PostgresSqlExecutor
 from pgproof.adapters.postgres.writer import PostgresRowWriter
 from pgproof.adapters.report import FileReportWriter, HtmlRenderer, JsonRenderer
 from pgproof.adapters.spec.yaml_loader import YamlSpecLoader
@@ -23,6 +24,7 @@ from pgproof.core.ports import (
     ReportWriter,
     RowWriter,
     SpecLoader,
+    SqlExecutor,
 )
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "pgproof"
@@ -65,6 +67,7 @@ def test_application_does_not_depend_on_adapters_or_frameworks() -> None:
 def test_adapters_satisfy_their_ports() -> None:
     assert isinstance(PostgresRowWriter.__new__(PostgresRowWriter), RowWriter)
     assert isinstance(PostgresQueryRunner.__new__(PostgresQueryRunner), QueryRunner)
+    assert isinstance(PostgresSqlExecutor.__new__(PostgresSqlExecutor), SqlExecutor)
     assert isinstance(YamlSpecLoader(), SpecLoader)
     assert isinstance(JsonRenderer(), ReportRenderer)
     assert isinstance(HtmlRenderer(), ReportRenderer)

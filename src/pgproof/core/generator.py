@@ -17,9 +17,11 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 
+from .distribution import build_distribution, coerce_value
 from .invariants import LocalRules, infer_semantic, parse_local_rules
 from .ir import Catalog, Column, DataKind, Table
 from .planner import Plan
+from .profile import Profile
 
 
 class GenerationError(RuntimeError):
@@ -78,12 +80,26 @@ class GeneratedTable:
 
 
 class Generator:
-    def __init__(self, catalog: Catalog, plan: Plan) -> None:
+    def __init__(self, catalog: Catalog, plan: Plan, profile: Profile | None = None) -> None:
         self.catalog = catalog
         self.plan = plan
+        self.profile = profile
         self.rules: dict[str, LocalRules] = {
             table.key: parse_local_rules(table) for table in catalog.tables
         }
+        self.distributions: dict[tuple[str, str], Any] = {}
+        if profile is not None:
+            for table in catalog.tables:
+                stats = profile.tables.get(table.key)
+                if not stats:
+                    continue
+                for column in table.columns:
+                    column_stats = stats.columns.get(column.name)
+                    if not column_stats:
+                        continue
+                    distribution = build_distribution(column_stats, column)
+                    if distribution is not None:
+                        self.distributions[(table.key, column.name)] = distribution
         self.pools: dict[tuple[str, tuple[str, ...]], list[tuple[Any, ...]]] = {}
         self._rngs: dict[str, random.Random] = {}
         self._unique_columns: dict[str, set[str]] = {}
@@ -335,6 +351,19 @@ class Generator:
 
     # ------------------------------------------------------------- values
     def _value(self, column: Column, table: Table, index: int, rng: random.Random) -> Any:
+        distribution = self.distributions.get((table.key, column.name))
+        if distribution is not None:
+            sampled = distribution.sample(rng)
+            if sampled is None:
+                return None
+            sampled = coerce_value(column, sampled)
+            return self._unique_value(
+                table,
+                column,
+                index,
+                self._apply_rules(column, sampled, self.rules[table.key], rng),
+            )
+
         if column.nullable and rng.random() < 0.02:
             return None
 

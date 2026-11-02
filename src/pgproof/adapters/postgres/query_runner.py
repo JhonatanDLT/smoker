@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import date, datetime
 from datetime import time as time_value
 from decimal import Decimal
@@ -9,7 +10,8 @@ from typing import Any
 
 import psycopg
 
-from ...core.ir import quote_qualified
+from ...core.ir import Table, quote_ident, quote_qualified
+from .serialization import copy_text
 
 
 def _jsonable(value: Any) -> Any:
@@ -78,3 +80,28 @@ class PostgresQueryRunner:
                 cur.execute(f"SELECT count(*) FROM {quote_qualified(schema, name)}")
                 counts[key] = int(cur.fetchone()[0])
         return counts
+
+    def dataset_digest(self, tables: list[Table]) -> str:
+        """Hash the target data in a canonical order.
+
+        Used after repairs, when the generation hash no longer describes the
+        final dataset. Ordering by primary key keeps it reproducible.
+        """
+        hasher = hashlib.sha256()
+        with self.connection.cursor() as cur:
+            for table in tables:
+                columns = [column.name for column in table.writable_columns]
+                if not columns:
+                    continue
+                column_list = ", ".join(quote_ident(name) for name in columns)
+                order_columns = table.primary_key or columns
+                order_list = ", ".join(quote_ident(name) for name in order_columns)
+                cur.execute(
+                    f"SELECT {column_list} FROM {quote_qualified(table.schema, table.name)} "
+                    f"ORDER BY {order_list}"
+                )
+                for row in cur:
+                    hasher.update(
+                        ("\t".join(copy_text(value) for value in row) + "\n").encode("utf-8")
+                    )
+        return hasher.hexdigest()

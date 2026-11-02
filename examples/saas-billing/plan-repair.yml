@@ -1,0 +1,30 @@
+# Cross-table rule with an explicit repair.
+# pgproof generates the dataset, runs the repair, then verifies the rule.
+
+invariants:
+  - id: invoice_total_matches_lines
+    table: billing.invoices
+    description: invoice total equals the sum of its lines
+    sql: |
+      SELECT i.id
+      FROM billing.invoices i
+      LEFT JOIN (
+        SELECT invoice_id, SUM(amount) AS line_total
+        FROM billing.invoice_lines
+        GROUP BY invoice_id
+      ) l ON l.invoice_id = i.id
+      WHERE i.total <> COALESCE(l.line_total, 0)
+    repair: |
+      UPDATE billing.invoices i
+      SET total = COALESCE((
+        SELECT SUM(l.amount)
+        FROM billing.invoice_lines l
+        WHERE l.invoice_id = i.id
+      ), 0)
+
+  - id: subscription_ends_after_start
+    table: billing.subscriptions
+    description: a subscription that ends does so after it starts
+    sql: |
+      SELECT id FROM billing.subscriptions
+      WHERE ends_at IS NOT NULL AND ends_at <= started_at

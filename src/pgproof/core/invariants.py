@@ -45,6 +45,7 @@ class Invariant:
     columns: list[str] = field(default_factory=list)
     confidence: float = 1.0
     note: str | None = None
+    repair_sql: str | None = None
 
     @property
     def key(self) -> str:
@@ -466,6 +467,7 @@ def invariants_to_dict(invariants: list[Invariant]) -> list[dict[str, Any]]:
             "confidence": inv.confidence,
             "note": inv.note,
             "violation_sql": inv.violation_sql,
+            "repair_sql": inv.repair_sql,
         }
         for inv in invariants
     ]

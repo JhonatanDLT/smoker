@@ -13,8 +13,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from .ir import Catalog
+from .ir import Catalog, to_plain
 from .planner import Plan
+from .repair import RepairResult
 from .verifier import InvariantResult, Verification
 
 DEFAULT_LIMITATIONS = [
@@ -45,6 +46,7 @@ class Report:
     limitations: list[str] = field(default_factory=lambda: list(DEFAULT_LIMITATIONS))
     command: str = ""
     total_rows: int = 0
+    repairs: RepairResult | None = None
 
     def summary(self) -> dict[str, int]:
         return {
@@ -57,9 +59,24 @@ class Report:
         }
 
     def to_dict(self) -> dict[str, Any]:
+        repairs = (
+            {
+                **to_plain(self.repairs),
+                "applied": self.repairs.applied,
+                "improved": self.repairs.improved,
+            }
+            if self.repairs
+            else {
+                "actions": [],
+                "passes": 0,
+                "residual": 0,
+                "applied": 0,
+                "improved": False,
+            }
+        )
         return {
             "tool": "pgproof",
-            "format_version": 1,
+            "format_version": 2,
             "verdict": self.verdict,
             "created_at": self.created_at,
             "seed": self.seed,
@@ -89,6 +106,7 @@ class Report:
             "warnings": self.warnings,
             "limitations": self.limitations,
             "reproduce": self.command,
+            "repairs": repairs,
         }
 
 
@@ -100,6 +118,7 @@ def build_report(
     warnings: list[str],
     command: str = "",
     dataset_hash: str | None = None,
+    repairs: RepairResult | None = None,
 ) -> Report:
     schema_hash = hashlib.sha256(
         json.dumps(catalog.to_dict(), sort_keys=True, ensure_ascii=False).encode()
@@ -123,4 +142,5 @@ def build_report(
         warnings=warnings,
         command=command,
         total_rows=sum(table_counts.values()),
+        repairs=repairs,
     )

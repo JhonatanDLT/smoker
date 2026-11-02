@@ -25,6 +25,8 @@ This page exists because trust is built by publishing what you do **not** do.
 | Exclusion constraints (`EXCLUDE`) | `skipped` | Not generated against; PostgreSQL enforces them at load time. |
 | Cross-table business rules | not enforced | `invoice.total = SUM(lines.amount)` requires a repair pass that v1 does not have. Declare it in the spec and it will be verified, not fixed. |
 | `INSERT` mode with self-references | falls back to `COPY` | A row-by-row insert cannot reference a row that has not been inserted yet. |
+| Distributions | sampled, optional | Derived from `LIMIT n`; independent per column; disabled below 50 sampled rows. |
+| Repairs | explicit only | A rule is repaired only when the spec declares `repair:`. |
 | Row-level security policies | ignored | Generation uses a privileged connection. |
 | Domain constraints | partially | The base type is generated; domain `CHECK`s are enforced by PostgreSQL at load time. |
 | `NOT VALID` constraints | verified, flagged | They are enforced on new rows, so we check them and warn that old rows were never validated. |
@@ -53,3 +55,19 @@ This page exists because trust is built by publishing what you do **not** do.
 - That it covers triggers or application code.
 
 It reports coverage, violations, skipped items and limitations. Nothing else.
+
+## Distribution and repair limits
+
+- Profiles use `LIMIT n`. On large tables the sample is biased by physical
+  order; `TABLESAMPLE` is a v0.4 improvement.
+- Date and timestamp histograms are not used yet; dates fall back to semantic
+  generation.
+- Correlations between columns (country ↔ city, price ↔ category) are not
+  modelled. Each distribution is sampled independently.
+- `top_values` can contain personally identifiable information. Use
+  `pgproof profile --no-values` for sensitive schemas, and keep the profile file
+  out of the repository.
+- Repairs are explicit SQL. pgproof does not invert arbitrary application rules
+  automatically.
+- Repairs run at most `--max-passes` times. A rule that does not converge is
+  reported as residual; it is never retried forever.

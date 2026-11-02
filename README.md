@@ -74,7 +74,7 @@ open proof/report.html
 Expected output:
 
 ```
-pgproof 0.1.0 · 10 tables · 2,000 rows · seed 42
+pgproof 0.2.0 · 10 tables · 2,000 rows · seed 42
   generate billing.accounts        200 rows
   generate billing.plans           200 rows
   ...
@@ -88,10 +88,11 @@ RESULT PASS · 63 passed · 0 failed · 0 errors · 2 skipped · 0 violations
 | Command | What it does |
 |---|---|
 | `pgproof introspect` | Save the catalog as JSON |
+| `pgproof profile` | Sample the source and save a distribution profile |
 | `pgproof plan` | Build a generation plan without touching data |
 | `pgproof generate` | Generate rows into a target database |
 | `pgproof verify` | Verify invariants and write a report |
-| `pgproof run` | All of the above, end to end |
+| `pgproof run` | Introspect, generate, repair, verify and report |
 
 Common options:
 
@@ -100,8 +101,12 @@ Common options:
 --rows                 default rows per table (default: 1000)
 --table-rows           per-table overrides, e.g. users=5000,plans=5
 --seed                 deterministic seed (default: 42)
---spec                 YAML file with application-level rules
+--spec                 YAML file with application-level rules and repairs
+--profile              profile JSON from `pgproof profile`
 --out                  output directory (default: proof)
+--format               json,html,junit (default: all three)
+--fail-on              never, error, fail (default: fail)
+--max-passes           repair fixed-point limit (default: 3)
 --truncate/--no-truncate
 ```
 
@@ -150,6 +155,59 @@ load failed in debug.bad
 
 `pgproof` exits `2` on a load error and `1` on a verification failure.
 
+## Repairs
+
+A cross-table rule can declare how to fix itself:
+
+```yaml
+- id: invoice_total_matches_lines
+  table: billing.invoices
+  description: invoice total equals the sum of its lines
+  sql: |
+    SELECT i.id FROM billing.invoices i
+    LEFT JOIN (SELECT invoice_id, SUM(amount) t FROM billing.invoice_lines GROUP BY 1) l
+      ON l.invoice_id = i.id
+    WHERE i.total <> COALESCE(l.t, 0)
+  repair: |
+    UPDATE billing.invoices i
+    SET total = COALESCE((
+      SELECT SUM(l.amount) FROM billing.invoice_lines l WHERE l.invoice_id = i.id
+    ), 0)
+```
+
+The pipeline becomes **generate → repair → verify**. It runs up to
+`--max-passes` times, stops when it converges, and recomputes the dataset hash
+after the repair. The report lists every action with before/after counts.
+
+```bash
+pgproof run --spec examples/saas-billing/plan-repair.yml --out proof
+# repairs: 50 rows across 1 actions in 1 pass(es), residual 0
+```
+
+## Distributions
+
+`pgproof profile` samples the source and stores per-column aggregates: null
+fraction, distinct count, top values and numeric histograms. `--profile` feeds
+them back into the generator, so the synthetic data keeps the source's skew
+without copying a single real row.
+
+```bash
+pgproof profile --dsn-env PGPROOF_SOURCE_DSN --sample 10000 -o profile.json
+pgproof run --profile profile.json --rows 5000 --out proof
+```
+
+Constraint correctness always wins: a sampled value still passes through the
+local rule engine and the database.
+
+## CI and exit codes
+
+- `report.xml` is JUnit, ready for GitHub Actions, GitLab, Jenkins or Buildkite.
+- `--fail-on never` runs in shadow mode: the report is written, the build
+  passes. Flip to `fail` when the team trusts the baseline.
+- `--fail-on error` fails only when verification could not run.
+- Exit codes: `0` pass, `1` verification failure, `2` load or configuration
+  error.
+
 ## What it does not verify (yet)
 
 - Trigger side effects. Triggers are inventoried and reported as `skipped`.
@@ -170,6 +228,8 @@ is worse than no certificate.**
   guaranteed by construction, not by retry.
 - Local rules (`> 0`, `IN (...)`, `a = b * c`, `ends_at > starts_at`) are
   applied before the row reaches PostgreSQL.
+- When a profile is provided, categorical and numeric distributions are sampled
+  before semantic rules, never instead of constraint checks.
 - Every table gets its own RNG seeded from `(seed, table)`.
 
 ---

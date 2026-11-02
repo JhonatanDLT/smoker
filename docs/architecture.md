@@ -10,8 +10,8 @@
                 │ depends on
 ┌───────────────▼──────────────────────────────┐
 │ application/              use cases          │  pure orchestration
-│  GenerateDataset · VerifyDataset ·           │
-│  RunPipeline                                 │
+│  GenerateDataset · RepairDataset ·           │
+│  VerifyDataset · RunPipeline                 │
 └───────────────┬──────────────────────────────┘
                 │ depends on
 ┌───────────────▼──────────────────────────────┐
@@ -44,6 +44,7 @@ The dependency rule is enforced by `tests/test_architecture.py`:
 | `CatalogReader` | Read a schema into the domain model | `postgres.introspect` |
 | `RowWriter` | Truncate, write rows, reset sequences, commit/rollback | `PostgresRowWriter` |
 | `QueryRunner` | Count violations, sample rows, read identity and warnings | `PostgresQueryRunner` |
+| `SqlExecutor` | Run repair statements and control their transaction | `PostgresSqlExecutor` |
 | `SpecLoader` | Turn a file into application invariants | `YamlSpecLoader` |
 | `ReportRenderer` | Render one format | `JsonRenderer`, `HtmlRenderer` |
 | `ReportWriter` | Persist every rendered format | `FileReportWriter` |
@@ -80,13 +81,14 @@ imports beyond the standard library.
 ```
 1. introspect(conn)              → Catalog
 2. build_plan(catalog, rows)     → Plan (order, cycles, budgets)
-3. Generator(catalog, plan)      → row streams
+3. Generator(catalog, plan)      → row streams (profile-aware)
 4. RowWriter.write(table, …)     → COPY into the target
-5. invariants_from_catalog()     → [Invariant]
+5. RepairDataset.execute(…)      → deterministic repair statements
+6. invariants_from_catalog()     → [Invariant]
    + SpecLoader.load()           → application rules
-6. verify_all(QueryRunner, …)    → Verification
-7. build_report(…)               → Report
-8. FileReportWriter.write(…)     → report.json + report.html
+7. verify_all(QueryRunner, …)    → Verification
+8. build_report(…)               → Report (format_version 2)
+9. FileReportWriter.write(…)     → report.json + report.html + report.xml
 ```
 
 ## Introspection
@@ -155,6 +157,34 @@ Each table has its own `random.Random` seeded with `f"{seed}:{table}"`. Retries
 consume the same stream in the same order, so two runs with the same seed
 produce the same rows and the same SHA-256 digest.
 
+### Distributions
+
+`pgproof profile` samples the source and produces `core.profile.Profile`:
+null fraction, distinct count, top values and 20-bucket histograms. The
+generator asks `build_distribution` for a column and samples from it before
+falling back to semantic rules.
+
+```
+profile → CategoricalDistribution | NumericDistribution | BooleanDistribution
+        → sampled value → local rules → unique suffix → row
+```
+
+Constraint correctness always wins: a sampled value that violates a range or a
+check is resampled. Distributions are skipped for samples below 50 rows, for
+unique identifiers, and for columns where the top-k does not describe the
+column.
+
+### Repairs
+
+A spec invariant may declare `repair:`. `RepairDataset` runs those statements
+in a transaction, up to `max_passes` times, and stops at a fixed point. It
+records before/after violations and rows affected. The final dataset digest is
+computed from the target after repairs, so the certificate describes the data
+the team actually has.
+
+Repairs are explicit on purpose. Inverting arbitrary SQL is a research problem;
+a declared `UPDATE` is auditable and safe.
+
 ## Verification
 
 | Level | What it checks |
@@ -186,6 +216,15 @@ load failed in debug.bad
 For `COPY`, PostgreSQL reports a line number; the application layer replays the
 deterministic generator up to that line to recover the offending row values.
 For `INSERT`, the row is captured directly.
+
+## Report
+
+The JSON is canonical (`format_version: 2`). HTML and JUnit XML are renderings.
+They include the verdict, per-invariant status and samples, skipped items,
+repairs (rule, pass, before/after, rows affected), limitations, the reproducer
+command, and both schema and dataset hashes.
+
+A certificate that hides its gaps is worse than no certificate.
 
 ## Security
 

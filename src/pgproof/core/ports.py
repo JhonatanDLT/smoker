@@ -52,6 +52,17 @@ class QueryRunner(Protocol):
 
     def table_counts(self, keys: list[str]) -> dict[str, int]: ...
 
+    def dataset_digest(self, tables: list[Table]) -> str: ...
+
+
+@runtime_checkable
+class SqlExecutor(Protocol):
+    def execute(self, sql: str) -> int: ...
+
+    def commit(self) -> None: ...
+
+    def rollback(self) -> None: ...
+
 
 @runtime_checkable
 class SpecLoader(Protocol):

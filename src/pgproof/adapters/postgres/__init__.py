@@ -7,11 +7,13 @@ the introspection helper.
 from .introspect import connect, introspect, table_counts
 from .profile import profile_catalog
 from .query_runner import PostgresQueryRunner
+from .sql_executor import PostgresSqlExecutor
 from .writer import PostgresRowWriter, reset_sequences, truncate, write_table
 
 __all__ = [
     "PostgresQueryRunner",
     "PostgresRowWriter",
+    "PostgresSqlExecutor",
     "connect",
     "introspect",
     "profile_catalog",

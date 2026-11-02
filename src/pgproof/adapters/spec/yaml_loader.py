@@ -39,6 +39,7 @@ class YamlSpecLoader:
                     status=InvariantStatus.DECLARED,
                     source="spec",
                     columns=list(raw.get("columns") or []),
+                    repair_sql=(raw.get("repair") or "").strip() or None,
                 )
             )
         return invariants

@@ -16,6 +16,7 @@ from ..core.generator import GenerationError, Generator
 from ..core.ir import Catalog, Table
 from ..core.planner import Plan, build_plan
 from ..core.ports import RowWriter
+from ..core.profile import Profile
 
 Progress = Callable[[str, int, float], None]
 
@@ -42,6 +43,7 @@ class GenerateDataset:
         method: str = "copy",
         truncate: bool = True,
         progress: Progress | None = None,
+        profile: Profile | None = None,
     ) -> None:
         self.catalog = catalog
         self.writer = writer
@@ -51,6 +53,7 @@ class GenerateDataset:
         self.method = method
         self.truncate = truncate
         self.progress = progress or _noop_progress
+        self.profile = profile
 
     def execute(self) -> GenerateResult:
         plan = build_plan(
@@ -64,7 +67,7 @@ class GenerateDataset:
     def execute_plan(self, plan: Plan) -> GenerateResult:
         import time
 
-        generator = Generator(self.catalog, plan)
+        generator = Generator(self.catalog, plan, profile=self.profile)
         hasher = hashlib.sha256()
         counts: dict[str, int] = {}
         try:
@@ -97,7 +100,7 @@ class GenerateDataset:
         if error.row is not None or error.row_index is None:
             return
         try:
-            replay = Generator(self.catalog, plan)
+            replay = Generator(self.catalog, plan, profile=self.profile)
             rows = list(islice(replay.generate_validated(table), error.row_index + 1))
         except GenerationError:
             return

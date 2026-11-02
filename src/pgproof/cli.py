@@ -17,18 +17,23 @@ import typer
 
 from . import __version__
 from .adapters.postgres.introspect import connect, introspect
+from .adapters.postgres.profile import profile_catalog
 from .adapters.postgres.query_runner import PostgresQueryRunner
+from .adapters.postgres.sql_executor import PostgresSqlExecutor
 from .adapters.postgres.writer import PostgresRowWriter
-from .adapters.report import FileReportWriter, HtmlRenderer, JsonRenderer
+from .adapters.report import FileReportWriter, HtmlRenderer, JsonRenderer, JUnitRenderer
 from .adapters.spec.yaml_loader import SpecError, YamlSpecLoader
 from .application.generate import GenerateDataset
+from .application.policy import FailPolicy, should_fail
+from .application.repair import RepairDataset
 from .application.run import RunPipeline
 from .application.verify import VerifyDataset, VerifyRequest
-from .core.errors import LoadError
+from .core.errors import LoadError, RepairError
 from .core.generator import GenerationError
 from .core.invariants import semantic_for_catalog
 from .core.ir import Catalog
 from .core.planner import PlanError, build_plan
+from .core.profile import Profile
 
 app = typer.Typer(
     add_completion=False,
@@ -89,8 +94,35 @@ def _load_catalog(path: Path | None, dsn: str) -> Catalog:
     return catalog
 
 
-def _report_writer() -> FileReportWriter:
-    return FileReportWriter([JsonRenderer(), HtmlRenderer()])
+def _load_profile(path: Path | None) -> Profile | None:
+    if path is None:
+        return None
+    return Profile.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+_REPORT_RENDERERS = {
+    "json": JsonRenderer,
+    "html": HtmlRenderer,
+    "junit": JUnitRenderer,
+}
+
+
+def _report_writer(formats: str) -> FileReportWriter:
+    renderers = []
+    for name in formats.split(","):
+        name = name.strip().lower()
+        if not name:
+            continue
+        factory = _REPORT_RENDERERS.get(name)
+        if factory is None:
+            raise typer.BadParameter(
+                f"unknown report format {name!r}; choose from "
+                f"{', '.join(sorted(_REPORT_RENDERERS))}"
+            )
+        renderers.append(factory())
+    if not renderers:
+        raise typer.BadParameter("--format cannot be empty")
+    return FileReportWriter(renderers)
 
 
 def _command_line() -> str:
@@ -146,8 +178,7 @@ def introspect_cmd(
 
 
 @app.command("plan")
-def plan_cmd(
-    dsn: str | None = typer.Option(None, "--dsn"),
+def plan_cmd(    dsn: str | None = typer.Option(None, "--dsn"),
     dsn_env: str = typer.Option("PGPROOF_SOURCE_DSN", "--dsn-env"),
     rows: int = typer.Option(1000, "--rows", help="Default rows per table"),
     seed: int = typer.Option(42, "--seed"),
@@ -181,6 +212,34 @@ def plan_cmd(
     typer.echo(f"{len(plan.tables)} tables · {plan.total_rows:,} rows → {out}")
 
 
+@app.command("profile")
+def profile_cmd(
+    dsn: str | None = typer.Option(None, "--dsn", help="DSN or environment variable name"),
+    dsn_env: str = typer.Option("PGPROOF_SOURCE_DSN", "--dsn-env"),
+    sample: int = typer.Option(1000, "--sample", help="Rows sampled per table"),
+    out: Path = typer.Option(Path("profile.json"), "--out", "-o"),
+    no_values: bool = typer.Option(
+        False, "--no-values", help="Omit top values for PII-sensitive schemas"
+    ),
+) -> None:
+    """Sample the source and save a profile for distribution-aware generation."""
+    with connect(_dsn(dsn, dsn_env)) as connection:
+        catalog = introspect(connection)
+        profile = profile_catalog(connection, catalog.tables, sample=sample)
+    if no_values:
+        for table in profile.tables.values():
+            for column_stats in table.columns.values():
+                column_stats.top_values = []
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        json.dumps(profile.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    typer.echo(
+        f"{len(profile.tables)} tables · sample {sample} · "
+        f"{sum(len(t.columns) for t in profile.tables.values())} columns → {out}"
+    )
+
+
 @app.command("generate")
 def generate_cmd(
     source: str | None = typer.Option(None, "--source", help="DSN or env var name"),
@@ -193,6 +252,7 @@ def generate_cmd(
     truncate_first: bool = typer.Option(True, "--truncate/--no-truncate"),
     method: str = typer.Option("copy", "--method", help="copy or insert"),
     catalog_path: Path | None = typer.Option(None, "--catalog"),
+    profile_path: Path | None = typer.Option(None, "--profile", help="Profile JSON"),
 ) -> None:
     """Generate rows into the target database."""
     source_dsn = _dsn(source, source_env)
@@ -212,6 +272,7 @@ def generate_cmd(
         method=method,
         truncate=truncate_first,
         progress=_progress,
+        profile=_load_profile(profile_path),
     )
     try:
         result = use_case.execute()
@@ -238,6 +299,10 @@ def verify_cmd(
     sample: int = typer.Option(5, "--sample", help="Rows to show per failure"),
     seed: int = typer.Option(42, "--seed"),
     catalog_path: Path | None = typer.Option(None, "--catalog"),
+    format: str = typer.Option(
+        "json,html,junit", "--format", help="Comma-separated: json,html,junit"
+    ),
+    fail_on: FailPolicy = typer.Option(FailPolicy.FAIL, "--fail-on"),
 ) -> None:
     """Verify every invariant against the target database."""
     target_dsn = _dsn(dsn, dsn_env)
@@ -261,11 +326,11 @@ def verify_cmd(
     finally:
         connection.close()
 
-    paths = _report_writer().write(report, str(out))
+    paths = _report_writer(format).write(report, str(out))
     _print_summary(report)
     for path in paths:
         typer.echo(f"report: {path}")
-    if report.verdict != "PASS":
+    if should_fail(report, fail_on):
         raise typer.Exit(code=1)
 
 
@@ -284,6 +349,12 @@ def run_cmd(
     method: str = typer.Option("copy", "--method", help="copy or insert"),
     sample: int = typer.Option(5, "--sample"),
     catalog_path: Path | None = typer.Option(None, "--catalog"),
+    format: str = typer.Option(
+        "json,html,junit", "--format", help="Comma-separated: json,html,junit"
+    ),
+    fail_on: FailPolicy = typer.Option(FailPolicy.FAIL, "--fail-on"),
+    max_passes: int = typer.Option(3, "--max-passes", help="Repair fixed-point limit"),
+    profile_path: Path | None = typer.Option(None, "--profile", help="Profile JSON"),
 ) -> None:
     """Introspect, generate, verify and write a report."""
     started = time.perf_counter()
@@ -309,11 +380,17 @@ def run_cmd(
         method=method,
         truncate=truncate_first,
         progress=_progress,
+        profile=_load_profile(profile_path),
     )
     verify = VerifyDataset(catalog, PostgresQueryRunner(connection), YamlSpecLoader(), seed=seed)
+    repair = RepairDataset(
+        PostgresQueryRunner(connection),
+        PostgresSqlExecutor(connection),
+        max_passes=max_passes,
+    )
 
     try:
-        result = RunPipeline(generate, verify).execute(
+        result = RunPipeline(generate, verify, repair).execute(
             VerifyRequest(
                 spec_path=str(spec) if spec else None,
                 sample=sample,
@@ -325,6 +402,9 @@ def run_cmd(
         return
     except GenerationError as exc:
         _fail(f"generation failed: {exc}")
+        return
+    except RepairError as exc:
+        _fail(str(exc))
         return
     except SpecError as exc:
         _fail(f"invalid spec: {exc}")
@@ -348,12 +428,18 @@ def run_cmd(
     for warning in result.generated.plan.warnings:
         typer.echo(f"warn: {warning}", err=True)
 
-    paths = _report_writer().write(result.report, str(out))
+    paths = _report_writer(format).write(result.report, str(out))
+    if result.repairs.actions:
+        typer.echo(
+            f"repairs: {result.repairs.applied} rows across "
+            f"{len(result.repairs.actions)} actions in {result.repairs.passes} pass(es), "
+            f"residual {result.repairs.residual}"
+        )
     _print_summary(result.report)
     typer.echo(f"elapsed: {time.perf_counter() - started:.2f}s")
     for path in paths:
         typer.echo(f"report: {path}")
-    if result.report.verdict != "PASS":
+    if should_fail(result.report, fail_on):
         raise typer.Exit(code=1)
 
 

@@ -1,9 +1,9 @@
 # Status
 
 **Date:** 2026-11-02
-**Version:** 0.1.0
-**State:** working v1 core, four fixture schemas, clean-architecture guardrails,
-tested end to end against PostgreSQL 16.
+**Version:** 0.2.0
+**State:** working v1 plus CI output, repair loop and distribution-aware
+generation. Tested end to end against PostgreSQL 16.
 
 ---
 
@@ -23,9 +23,12 @@ tested end to end against PostgreSQL 16.
 | `COPY` writer with `INSERT` fallback | ✅ |
 | Independent verifier with violation samples | ✅ |
 | Structured load errors (table, constraint, row, values, SQLSTATE) | ✅ |
-| JSON + HTML report with limitations | ✅ |
-| Dataset SHA-256 (reproducibility) | ✅ |
-| CLI: `introspect`, `plan`, `generate`, `verify`, `run` | ✅ |
+| JSON + HTML + **JUnit XML** report | ✅ |
+| `--fail-on never/error/fail` (shadow mode) | ✅ |
+| **Repair loop** with fixed-point limit and residual reporting | ✅ |
+| **Distribution profiling** (`pgproof profile`) and profile-aware generation | ✅ |
+| Dataset SHA-256 (recomputed after repairs) | ✅ |
+| CLI: `introspect`, `profile`, `plan`, `generate`, `verify`, `run` | ✅ |
 | Clean architecture: ports, use cases, adapters | ✅ |
 | Architecture guards in the test suite | ✅ |
 | Ruff clean | ✅ |
@@ -42,9 +45,10 @@ tested end to end against PostgreSQL 16.
 ## Measured
 
 - 10-table billing schema, 180,000 rows generated and verified in **5.04 s**.
+- Repair: 50 invoices repaired in one pass, residual 0, PASS.
+- Distribution: source skew 80/20 reproduced at **81/19** in the target, PASS.
+- **45 tests passing** (unit, integration and architecture guards).
 - Same seed produces the same dataset hash every run.
-- **24 tests passing**: 13 unit, 8 integration, 3 architecture.
-- Fixture runner creates one database per schema and writes a report for each.
 
 ## How to run it
 
@@ -59,6 +63,22 @@ make test
 PGPROOF_TEST_DSN=postgresql:///pgproof_demo .venv/bin/pytest -m integration
 ```
 
+Repair demo:
+
+```bash
+PGPROOF_SOURCE_DSN=postgresql:///pgproof_demo \
+PGPROOF_TARGET_DSN=postgresql:///pgproof_demo \
+  .venv/bin/pgproof run --rows 50 \
+  --spec examples/saas-billing/plan-repair.yml --out proof
+```
+
+Distribution demo:
+
+```bash
+pgproof profile --dsn-env PGPROOF_SOURCE_DSN --sample 10000 -o profile.json
+pgproof run --profile profile.json --rows 5000 --out proof
+```
+
 ## Architecture
 
 ```
@@ -70,25 +90,24 @@ cli ──► application ──► core (domain + ports)
 - `core` has no third-party imports beyond the standard library.
 - `application` depends on ports, never on adapters.
 - `tests/test_architecture.py` fails the build if the rule is broken.
-- Adding SQL Server = one adapter. Adding JUnit XML = one renderer.
+- Adding SQL Server = one adapter. Adding SARIF = one renderer.
 
-## Known gaps (v1, by design)
+## Known gaps
 
 - Trigger side effects are inventoried but not replayed.
 - Exclusion constraints are not generated against.
-- Cross-table business rules are verified only if declared; they are not repaired.
-- Scope detection covers shared columns that are foreign keys in both tables.
-- Partitioned tables, RLS policies, arrays and `bytea` are partial.
+- Distributions are per column; correlations are not modelled.
+- Date histograms are not used.
+- Cross-table rules need an explicit `repair:` declaration.
 - SQL Server, MySQL and static code analysis are roadmap items.
 
 See [`docs/limitations.md`](docs/limitations.md).
 
 ## Next tasks
 
-1. JUnit XML renderer and a `--fail-on` policy (GitHub Action deliberately
-   postponed; keep the renderer ready for it).
-2. Distribution-aware generation from profiles.
-3. Repair loop for declared application rules.
+1. GitHub Action on top of the JUnit renderer (deliberately postponed).
+2. `TABLESAMPLE` and date histograms for profiles.
+3. Column correlations (country ↔ city, price ↔ category).
 4. Partitioned table routing.
 5. First design-partner pilot with the "two weeks or you do not pay" offer.
 

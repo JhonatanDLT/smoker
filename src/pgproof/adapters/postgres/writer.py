@@ -8,8 +8,6 @@ the deterministic generator when PostgreSQL only gives a COPY line number.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
-from datetime import date, datetime, time
-from decimal import Decimal
 from typing import Any
 
 import psycopg
@@ -17,6 +15,7 @@ import psycopg
 from ...core.errors import LoadError
 from ...core.ir import Table, quote_ident, quote_qualified
 from .errors import from_psycopg
+from .serialization import copy_text as _copy_text
 
 
 def truncate(conn: psycopg.Connection, tables: list[Table], cascade: bool = True) -> None:
@@ -105,28 +104,6 @@ def _insert_rows(
                 hasher.update(line.encode("utf-8"))
             count += 1
     return count
-
-
-def _copy_text(value: Any) -> str:
-    if value is None:
-        return "\\N"
-    if isinstance(value, bool):
-        return "t" if value else "f"
-    if isinstance(value, datetime):
-        return value.isoformat(sep=" ")
-    if isinstance(value, (date, time)):
-        return value.isoformat()
-    if isinstance(value, Decimal):
-        return format(value, "f")
-    if isinstance(value, (bytes, bytearray)):
-        return "\\x" + bytes(value).hex()
-    text = str(value)
-    return (
-        text.replace("\\", "\\\\")
-        .replace("\t", "\\t")
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-    )
 
 
 def reset_sequences(conn: psycopg.Connection, tables: list[Table]) -> None:

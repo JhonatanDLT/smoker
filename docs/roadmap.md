@@ -16,23 +16,24 @@ The order is deliberate: each phase is funded by the previous one.
 - Four fixtures: SaaS billing, e-commerce, multi-tenant CRM, analytics.
 - Clean architecture: ports, use cases and adapters, enforced by tests.
 
-## v0.2 — Sellable (weeks 3–6)
+## v0.2 — Sellable (delivered)
 
-- GitHub Action and JUnit XML output.
+- GitHub Action and JUnit XML output. *(JUnit delivered; the Action is pending.)*
 - `--fail-on` policy and exit codes documented.
 - Better error messages: table, constraint, row, and the SQL that failed.
-- Signed report digest and `--strict` mode.
-- Three public fixtures: SaaS billing, e-commerce, multi-tenant CRM.
-- `docker run` one-liner.
+- Signed report digest and `--strict` mode. *(Digest delivered; signing pending.)*
+- Four public fixtures: SaaS billing, e-commerce, multi-tenant CRM, analytics.
+- `docker run` one-liner. *(pending)*
 
-## v0.3 — Depth (weeks 7–12)
+## v0.3 — Depth (mostly delivered)
 
-- Distribution-aware generation from profiles (KS test against the source).
+- Distribution-aware generation from profiles (categorical, numeric, boolean).
+- Explicit repair loop with fixed-point limit and residual reporting.
 - More rule shapes: `BETWEEN`, `OR`, `IS NULL` implications, `LIKE` patterns.
-- Partitioned table routing.
-- Parallel table generation.
-- Repair loop for declared application rules (row-level first).
-- `pgproof explain <invariant>`: why a rule exists and where it came from.
+  *(partial)*
+- Partitioned table routing. *(pending)*
+- Parallel table generation. *(pending)*
+- Column correlations. *(pending)*
 
 ## v0.4 — SQL Server (months 4–6)
 
