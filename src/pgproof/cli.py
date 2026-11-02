@@ -22,7 +22,9 @@ from .adapters.postgres.query_runner import PostgresQueryRunner
 from .adapters.postgres.sql_executor import PostgresSqlExecutor
 from .adapters.postgres.writer import PostgresRowWriter
 from .adapters.report import FileReportWriter, HtmlRenderer, JsonRenderer, JUnitRenderer
+from .adapters.report.audit_markdown import AuditMarkdownRenderer
 from .adapters.spec.yaml_loader import SpecError, YamlSpecLoader
+from .application.audit import AuditSchema
 from .application.generate import GenerateDataset
 from .application.policy import FailPolicy, should_fail
 from .application.repair import RepairDataset
@@ -210,6 +212,23 @@ def plan_cmd(    dsn: str | None = typer.Option(None, "--dsn"),
     for warning in plan.warnings:
         typer.echo(f"warn: {warning}", err=True)
     typer.echo(f"{len(plan.tables)} tables · {plan.total_rows:,} rows → {out}")
+
+
+@app.command("audit")
+def audit_cmd(
+    dsn: str | None = typer.Option(None, "--dsn", help="DSN or environment variable name"),
+    dsn_env: str = typer.Option("PGPROOF_SOURCE_DSN", "--dsn-env"),
+    out: Path = typer.Option(Path("audit.md"), "--out", "-o"),
+) -> None:
+    """Produce a schema readiness audit without reading any data."""
+    catalog = _introspect(_dsn(dsn, dsn_env))
+    audit = AuditSchema(catalog).execute()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(AuditMarkdownRenderer().render(audit), encoding="utf-8")
+    typer.echo(
+        f"{audit.tables} tables · {audit.columns} columns · "
+        f"{len(audit.risks)} risks · {audit.verdict} → {out}"
+    )
 
 
 @app.command("profile")

@@ -25,6 +25,8 @@ generation. Tested end to end against PostgreSQL 16.
 | Structured load errors (table, constraint, row, values, SQLSTATE) | ✅ |
 | JSON + HTML + **JUnit XML** report | ✅ |
 | `--fail-on never/error/fail` (shadow mode) | ✅ |
+| **GitHub Action** with annotations and job summary | ✅ |
+| **Schema readiness audit** (`pgproof audit`) | ✅ |
 | **Repair loop** with fixed-point limit and residual reporting | ✅ |
 | **Distribution profiling** (`pgproof profile`) and profile-aware generation | ✅ |
 | Dataset SHA-256 (recomputed after repairs) | ✅ |
@@ -47,8 +49,14 @@ generation. Tested end to end against PostgreSQL 16.
 - 10-table billing schema, 180,000 rows generated and verified in **5.04 s**.
 - Repair: 50 invoices repaired in one pass, residual 0, PASS.
 - Distribution: source skew 80/20 reproduced at **81/19** in the target, PASS.
-- **45 tests passing** (unit, integration and architecture guards).
+- **55 tests passing** (unit, integration and architecture guards).
 - Same seed produces the same dataset hash every run.
+
+## Documentation
+
+The full set lives in [`docs/`](docs/README.md): getting started, CLI, spec,
+report formats, CI, security, troubleshooting, architecture, limitations, FAQ,
+contributing and the pilot playbook.
 
 ## How to run it
 
@@ -105,10 +113,10 @@ See [`docs/limitations.md`](docs/limitations.md).
 
 ## Next tasks
 
-1. GitHub Action on top of the JUnit renderer (deliberately postponed).
-2. `TABLESAMPLE` and date histograms for profiles.
-3. Column correlations (country ↔ city, price ↔ category).
-4. Partitioned table routing.
+1. `TABLESAMPLE` and date histograms for profiles.
+2. Column correlations (country ↔ city, price ↔ category).
+3. Partitioned table routing.
+4. Publish to PyPI and the GitHub Marketplace.
 5. First design-partner pilot with the "two weeks or you do not pay" offer.
 
 ## Decision rules

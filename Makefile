@@ -17,7 +17,7 @@ fixtures:
 	./scripts/run_fixtures.sh
 
 lint:
-	.venv/bin/ruff check src tests
+	.venv/bin/ruff check src tests scripts
 
 clean:
 	rm -rf proof .pytest_cache .ruff_cache build dist

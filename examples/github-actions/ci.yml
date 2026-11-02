@@ -1,0 +1,48 @@
+name: Database integrity
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pgproof:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      PGPROOF_DSN: postgresql://postgres:postgres@localhost:5432/app_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load the schema
+        run: psql "$PGPROOF_DSN" -v ON_ERROR_STOP=1 -f db/schema.sql
+
+      - name: Generate and verify
+        id: pgproof
+        uses: ./
+        with:
+          source-dsn: ${{ env.PGPROOF_DSN }}
+          target-dsn: ${{ env.PGPROOF_DSN }}
+          allow-same-db: "true"
+          rows: "2000"
+          spec: db/plan.yml
+          fail-on: fail
+
+      - name: Print the verdict
+        if: always()
+        run: echo "verdict=${{ steps.pgproof.outputs.verdict }} hash=${{ steps.pgproof.outputs.dataset-hash }}"

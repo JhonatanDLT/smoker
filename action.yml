@@ -1,0 +1,161 @@
+name: "pgproof"
+description: "Generate synthetic Postgres data and verify every invariant."
+author: "pgproof"
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  source-dsn:
+    description: "PostgreSQL DSN for the source schema. Pass it from secrets."
+    required: true
+  target-dsn:
+    description: "PostgreSQL DSN for the target database. Use an ephemeral CI database."
+    required: true
+  rows:
+    description: "Rows per table."
+    required: false
+    default: "5000"
+  seed:
+    description: "Deterministic seed."
+    required: false
+    default: "42"
+  spec:
+    description: "Path to the YAML spec with application rules and repairs."
+    required: false
+    default: ""
+  profile:
+    description: "Path to a profile JSON produced by `pgproof profile`."
+    required: false
+    default: ""
+  fail-on:
+    description: "never (shadow), error, or fail."
+    required: false
+    default: "fail"
+  max-passes:
+    description: "Repair fixed-point limit."
+    required: false
+    default: "3"
+  format:
+    description: "Comma-separated report formats: json,html,junit."
+    required: false
+    default: "json,html,junit"
+  out:
+    description: "Output directory for the reports."
+    required: false
+    default: "proof"
+  version:
+    description: "pgproof version to install, or 'source' to install this action's checkout."
+    required: false
+    default: "source"
+  python-version:
+    description: "Python version."
+    required: false
+    default: "3.12"
+  upload-artifact:
+    description: "Upload the report directory as an artifact."
+    required: false
+    default: "true"
+  allow-same-db:
+    description: "Allow source and target to be the same database."
+    required: false
+    default: "false"
+
+outputs:
+  verdict:
+    description: "PASS or FAIL."
+    value: ${{ steps.run.outputs.verdict }}
+  dataset-hash:
+    description: "SHA-256 of the generated dataset."
+    value: ${{ steps.run.outputs.dataset_hash }}
+  report-path:
+    description: "Path to the JSON report."
+    value: ${{ steps.run.outputs.report_path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: "pip"
+
+    - name: Install pgproof
+      shell: bash
+      run: |
+        if [ "${{ inputs.version }}" = "source" ]; then
+          python -m pip install --disable-pip-version-check "${{ github.action_path }}"
+        else
+          python -m pip install --disable-pip-version-check "pgproof==${{ inputs.version }}"
+        fi
+
+    - name: Generate and verify
+      id: run
+      shell: bash
+      continue-on-error: true
+      env:
+        PGPROOF_SOURCE_DSN: ${{ inputs.source-dsn }}
+        PGPROOF_TARGET_DSN: ${{ inputs.target-dsn }}
+        PGPROOF_FAIL_ON: ${{ inputs.fail-on }}
+        PGPROOF_SPEC: ${{ inputs.spec }}
+        PGPROOF_PROFILE: ${{ inputs.profile }}
+        PGPROOF_ROWS: ${{ inputs.rows }}
+        PGPROOF_SEED: ${{ inputs.seed }}
+        PGPROOF_MAX_PASSES: ${{ inputs.max-passes }}
+        PGPROOF_FORMAT: ${{ inputs.format }}
+        PGPROOF_OUT: ${{ inputs.out }}
+        PGPROOF_ALLOW_SAME_DB: ${{ inputs.allow-same-db }}
+      run: |
+        set -uo pipefail
+        if [ "$PGPROOF_ALLOW_SAME_DB" != "true" ] && [ "$PGPROOF_SOURCE_DSN" = "$PGPROOF_TARGET_DSN" ]; then
+          echo "::error title=pgproof::source-dsn and target-dsn are the same database"
+          echo "exit_code=2" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        args=(
+          --source-env PGPROOF_SOURCE_DSN
+          --target-env PGPROOF_TARGET_DSN
+          --rows "$PGPROOF_ROWS"
+          --seed "$PGPROOF_SEED"
+          --max-passes "$PGPROOF_MAX_PASSES"
+          --format "$PGPROOF_FORMAT"
+          --fail-on "$PGPROOF_FAIL_ON"
+          --out "$PGPROOF_OUT"
+        )
+        if [ -n "$PGPROOF_SPEC" ]; then args+=(--spec "$PGPROOF_SPEC"); fi
+        if [ -n "$PGPROOF_PROFILE" ]; then args+=(--profile "$PGPROOF_PROFILE"); fi
+
+        set +e
+        pgproof run "${args[@]}"
+        code=$?
+        set -e
+
+        echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+        echo "report_path=$PGPROOF_OUT/report.json" >> "$GITHUB_OUTPUT"
+
+        if [ -f "$PGPROOF_OUT/report.json" ]; then
+          python "${{ github.action_path }}/scripts/annotate.py" \
+            --report "$PGPROOF_OUT/report.json" \
+            --policy "$PGPROOF_FAIL_ON"
+          verdict=$(python -c "import json;print(json.load(open('$PGPROOF_OUT/report.json'))['verdict'])")
+          digest=$(python -c "import json;print(json.load(open('$PGPROOF_OUT/report.json'))['dataset_hash'])")
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          echo "dataset_hash=$digest" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Upload report
+      if: ${{ always() && inputs.upload-artifact == 'true' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: pgproof-report
+        path: ${{ inputs.out }}
+        if-no-files-found: ignore
+
+    - name: Fail the job
+      if: ${{ steps.run.outputs.exit_code != '0' }}
+      shell: bash
+      run: |
+        echo "pgproof exited with ${{ steps.run.outputs.exit_code }}"
+        exit 1

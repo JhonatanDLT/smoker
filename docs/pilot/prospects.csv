@@ -1,0 +1,4 @@
+company,segment,contact_name,role,email,linkedin,trigger,finding,status,next_action,next_date,notes
+Example Fintech,fintech-fiscal,Ana García,CTO,ana@example.com,https://linkedin.com/in/example,LFPDPPP audit,"4 tables without FK; invoices.total not reconciled with lines",new,"Send audit","",
+Example Agency,agency,Luis Pérez,Founder,luis@example.com,https://linkedin.com/in/example,New client UAT,"62 tables; 3 triggers with side effects",new,"Research schema","",
+Example SaaS,startup,María López,Platform Engineer,maria@example.com,https://linkedin.com/in/example,Postgres 14 to 17 migration,"Wide events table; 2 NOT VALID constraints",new,"Send audit","",

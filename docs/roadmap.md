@@ -18,11 +18,12 @@ The order is deliberate: each phase is funded by the previous one.
 
 ## v0.2 — Sellable (delivered)
 
-- GitHub Action and JUnit XML output. *(JUnit delivered; the Action is pending.)*
+- GitHub Action and JUnit XML output.
 - `--fail-on` policy and exit codes documented.
 - Better error messages: table, constraint, row, and the SQL that failed.
 - Signed report digest and `--strict` mode. *(Digest delivered; signing pending.)*
 - Four public fixtures: SaaS billing, e-commerce, multi-tenant CRM, analytics.
+- Schema readiness audit (`pgproof audit`).
 - `docker run` one-liner. *(pending)*
 
 ## v0.3 — Depth (mostly delivered)

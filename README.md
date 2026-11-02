@@ -88,6 +88,7 @@ RESULT PASS · 63 passed · 0 failed · 0 errors · 2 skipped · 0 violations
 | Command | What it does |
 |---|---|
 | `pgproof introspect` | Save the catalog as JSON |
+| `pgproof audit` | Produce a Markdown schema readiness audit |
 | `pgproof profile` | Sample the source and save a distribution profile |
 | `pgproof plan` | Build a generation plan without touching data |
 | `pgproof generate` | Generate rows into a target database |
@@ -125,7 +126,6 @@ CI.
 - Application rules declared in `--spec`
 
 ## Fixtures
-
 Three public schemas exercise different features:
 
 | Fixture | What it covers |
@@ -154,6 +154,18 @@ load failed in debug.bad
 ```
 
 `pgproof` exits `2` on a load error and `1` on a verification failure.
+
+## Audit
+
+Before generating anything, get a one-page assessment of the schema:
+
+```bash
+pgproof audit --dsn-env PGPROOF_SOURCE_DSN --out audit.md
+```
+
+It lists the inventory, the invariants pgproof would verify, and risks by
+severity: missing primary keys, orphan-prone tables, triggers, unparsed checks
+and `NOT VALID` constraints. It reads metadata only.
 
 ## Repairs
 
@@ -250,6 +262,20 @@ See [`docs/architecture.md`](docs/architecture.md) for the ports and the SOLID
 mapping.
 
 ---
+
+## Documentation
+
+- [Getting started](docs/getting-started.md)
+- [CLI reference](docs/cli-reference.md)
+- [Spec reference](docs/spec-reference.md)
+- [Report reference](docs/report-reference.md)
+- [CI integration](docs/ci.md)
+- [Security](docs/security.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Architecture](docs/architecture.md)
+- [Limitations](docs/limitations.md)
+- [Pilot playbook](docs/pilot/README.md)
+- [Full documentation index](docs/README.md)
 
 ## Development
 
