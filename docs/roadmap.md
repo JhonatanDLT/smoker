@@ -1,0 +1,71 @@
+# Roadmap
+
+The order is deliberate: each phase is funded by the previous one.
+
+## v0.1 — Core (current)
+
+- PostgreSQL 14–17 introspection.
+- Invariants from constraints, enums and checks.
+- Deterministic generation with pre-allocated keys and `COPY`.
+- Local rules: ranges, `IN`, arithmetic derivations, column orderings, unique
+  suffixes.
+- YAML spec for application rules.
+- JSON + HTML verification report.
+- CLI: `introspect`, `plan`, `generate`, `verify`, `run`.
+
+## v0.2 — Sellable (weeks 3–6)
+
+- GitHub Action and JUnit XML output.
+- `--fail-on` policy and exit codes documented.
+- Better error messages: table, constraint, row, and the SQL that failed.
+- Signed report digest and `--strict` mode.
+- Three public fixtures: SaaS billing, e-commerce, multi-tenant CRM.
+- `docker run` one-liner.
+
+## v0.3 — Depth (weeks 7–12)
+
+- Distribution-aware generation from profiles (KS test against the source).
+- More rule shapes: `BETWEEN`, `OR`, `IS NULL` implications, `LIKE` patterns.
+- Partitioned table routing.
+- Parallel table generation.
+- Repair loop for declared application rules (row-level first).
+- `pgproof explain <invariant>`: why a rule exists and where it came from.
+
+## v0.4 — SQL Server (months 4–6)
+
+Only if two paying customers request it in writing.
+
+- `synthadapters.mssql`: catalog introspection (`sys.*`), `BULK INSERT`, identity
+  handling, `SET IDENTITY_INSERT`.
+- SQL Server as a **source** for migration validation.
+- SQL Server as a **target** for generation.
+- Same invariant model, same report.
+
+## v0.5 — Other dialects (months 7–9)
+
+- MySQL / MariaDB.
+- Oracle only with an enterprise contract that funds the work.
+- A conformance suite that every adapter must pass.
+
+## v1.0 — Static code analysis (months 10–12)
+
+- Parse application SQL and ORM metadata to enrich the invariant set.
+- Detect rules that live only in `WHERE` clauses, `JOIN`s and `IF`s.
+- Rank candidate invariants by frequency and consistency across the codebase.
+- Cross-validate candidates against real data before publishing them.
+- New product surface: **migration impact analysis** ("what breaks if I change
+  this column?"), which shares the entire engine.
+
+## Commercial track (separate from the OSS core)
+
+- Hosted verification service: upload a schema, get a report, pay per seat.
+- Report archive and CI history.
+- SSO, audit log, DPA.
+- Not before 50 paying customers. The CLI is the distribution channel.
+
+## Explicitly not planned
+
+- A no-code UI for non-technical users.
+- A general-purpose data masking suite.
+- An LLM that writes schemas or decides eligibility.
+- Marketplace of community workflows.

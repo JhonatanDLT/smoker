@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pgproof"
+version = "0.1.0"
+description = "Synthetic Postgres data that ships with proof."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "pgproof" }]
+dependencies = [
+  "psycopg[binary]>=3.1",
+  "typer>=0.12",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.6",
+]
+
+[project.scripts]
+pgproof = "pgproof.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pgproof"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+  "integration: requires a live PostgreSQL (set PGPROOF_TEST_DSN)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

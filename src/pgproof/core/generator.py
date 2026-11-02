@@ -1,0 +1,476 @@
+"""Deterministic data generation.
+
+The generator is pure Python: it never connects to a database. It receives a
+catalog and a plan, and yields rows. Determinism is a product promise, so every
+random source is seeded from (plan.seed, table, column).
+"""
+
+from __future__ import annotations
+
+import random
+import re
+import uuid
+from collections.abc import Iterator
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal
+from typing import Any
+
+from .invariants import LocalRules, infer_semantic, parse_local_rules
+from .ir import Catalog, Column, DataKind, Table
+from .planner import Plan
+
+
+class GenerationError(RuntimeError):
+    pass
+
+
+_BASE_DATE = date(2025, 1, 1)
+_BASE_DATETIME = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+_FIRST_NAMES = [
+    "Ana", "Luis", "María", "Carlos", "Sofía", "Jorge", "Elena", "Miguel",
+    "Lucía", "Diego", "Valeria", "Andrés", "Camila", "Ricardo", "Paula",
+]
+_LAST_NAMES = [
+    "García", "Hernández", "López", "Martínez", "Rodríguez", "Pérez",
+    "Sánchez", "Ramírez", "Torres", "Flores", "Rivera", "Gómez",
+]
+_CITIES = [
+    "Ciudad de México", "Guadalajara", "Monterrey", "Puebla", "Querétaro",
+    "Mérida", "Tijuana", "León", "Toluca", "Cancún",
+]
+_REGIONS = [
+    "CDMX", "Jalisco", "Nuevo León", "Puebla", "Querétaro", "Yucatán",
+    "Baja California", "Guanajuato", "Estado de México", "Quintana Roo",
+]
+_COUNTRIES = ["México", "México", "México", "Colombia", "Chile", "España"]
+_COMPANIES = [
+    "Aurora Labs", "Norte Digital", "Cobalto", "Mercado Sur", "Punto Base",
+    "Delta Software", "Rumbo", "Claro Studio", "Fábrica de Datos", "Zenit",
+]
+_STREETS = ["Av. Reforma", "Calle Hidalgo", "Av. Juárez", "Calle Allende", "Av. Insurgentes"]
+_DOMAINS = ["example.com", "example.org", "example.mx"]
+_LOREM = [
+    "Registro generado para pruebas de integración.",
+    "Documento de ejemplo sin datos personales reales.",
+    "Fila sintética reproducible a partir de una semilla.",
+    "Caso borde incluido a propósito para ejercitar el esquema.",
+]
+
+
+def _slug(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+
+
+@dataclass
+class GeneratedTable:
+    key: str
+    columns: list[str]
+    rows: list[tuple[Any, ...]]
+
+
+class Generator:
+    def __init__(self, catalog: Catalog, plan: Plan) -> None:
+        self.catalog = catalog
+        self.plan = plan
+        self.rules: dict[str, LocalRules] = {
+            table.key: parse_local_rules(table) for table in catalog.tables
+        }
+        self.pools: dict[tuple[str, tuple[str, ...]], list[tuple[Any, ...]]] = {}
+        self._rngs: dict[str, random.Random] = {}
+        self._unique_columns: dict[str, set[str]] = {}
+        for table in catalog.tables:
+            self._unique_columns[table.key] = {
+                unique.columns[0] for unique in table.uniques if len(unique.columns) == 1
+            }
+        self._build_pools()
+
+    # ------------------------------------------------------------------ rng
+    def rng_for(self, key: str) -> random.Random:
+        if key not in self._rngs:
+            self._rngs[key] = random.Random(f"{self.plan.seed}:{key}")
+        return self._rngs[key]
+
+    # ---------------------------------------------------------------- pools
+    def _build_pools(self) -> None:
+        for table in self.catalog.tables:
+            rows = self.plan.tables[table.key].rows
+            key_sets: list[tuple[str, ...]] = []
+            if table.primary_key:
+                key_sets.append(tuple(table.primary_key))
+            for unique in table.uniques:
+                key_sets.append(tuple(unique.columns))
+            for columns in key_sets:
+                rng = self.rng_for(f"{table.key}:pool")
+                values = [
+                    tuple(self._key_value(table.column(name), table, index, rng) for name in columns)
+                    for index in range(rows)
+                ]
+                self.pools[(table.key, columns)] = values
+
+        # Foreign keys may list parent columns in a different order than the
+        # primary key, and may point at a unique key. Add reordered aliases.
+        for table in self.catalog.tables:
+            for fk in table.foreign_keys:
+                target = (fk.parent_key, tuple(fk.parent_columns))
+                if target in self.pools:
+                    continue
+                for (parent_key, columns), values in list(self.pools.items()):
+                    if parent_key != fk.parent_key or set(columns) != set(fk.parent_columns):
+                        continue
+                    positions = [columns.index(name) for name in fk.parent_columns]
+                    self.pools[target] = [
+                        tuple(value[position] for position in positions) for value in values
+                    ]
+                    break
+
+    def _key_value(self, column: Column, table: Table, index: int, rng: random.Random) -> Any:
+        kind = column.data_kind
+        if kind in (DataKind.SMALLINT, DataKind.INT, DataKind.BIGINT):
+            return index + 1
+        if kind == DataKind.UUID:
+            return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{self.plan.seed}:{table.key}:{index}"))
+        if kind == DataKind.TEXT:
+            return f"{_slug(table.name)}_{index + 1:06d}"
+        if kind in (DataKind.DATE, DataKind.TIMESTAMP, DataKind.TIMESTAMPTZ):
+            return _BASE_DATE + timedelta(days=index)
+        return index + 1
+
+    # ------------------------------------------------------------ generation
+    def generate_table(self, table: Table) -> Iterator[tuple[Any, ...]]:
+        columns = table.writable_columns
+        rows = self.plan.tables[table.key].rows
+        for index in range(rows):
+            yield self._make_row(table, columns, index)
+
+    def _make_row(self, table: Table, columns: list[Column], index: int) -> tuple[Any, ...]:
+        values: dict[str, Any] = {}
+        rng = self.rng_for(f"{table.key}:rows")
+
+        primary_key = tuple(table.primary_key)
+        pk_pool = self.pools.get((table.key, primary_key)) if primary_key else None
+        if pk_pool is not None and index < len(pk_pool):
+            for name, value in zip(primary_key, pk_pool[index]):
+                values[name] = value
+
+        nullable = {column.name: column.nullable for column in table.columns}
+        for fk in table.foreign_keys:
+            if all(name in values for name in fk.child_columns):
+                continue
+            pool = self.pools.get((fk.parent_key, tuple(fk.parent_columns)))
+            if not pool:
+                if all(nullable.get(name, True) for name in fk.child_columns):
+                    for name in fk.child_columns:
+                        values[name] = None
+                    continue
+                raise GenerationError(
+                    f"{table.key}: cannot populate foreign key {fk.name} because "
+                    f"{fk.parent_key}{tuple(fk.parent_columns)} has no primary or unique key"
+                )
+            if all(nullable.get(name, True) for name in fk.child_columns) and rng.random() < 0.04:
+                for name in fk.child_columns:
+                    values[name] = None
+                continue
+            parent_values = pool[rng.randrange(len(pool))]
+            for name, value in zip(fk.child_columns, parent_values):
+                values[name] = value
+
+        for column in columns:
+            if column.name in values:
+                continue
+            values[column.name] = self._value(column, table, index, rng)
+
+        self._apply_derived(table, values)
+        self._fix_orderings(table, values)
+        return tuple(values.get(column.name) for column in columns)
+
+    def _apply_derived(self, table: Table, values: dict[str, Any]) -> None:
+        for target, left, operator, right in self.rules[table.key].derived:
+            a = values.get(left)
+            b = values.get(right)
+            if a is None or b is None:
+                continue
+            try:
+                if operator == "*":
+                    values[target] = a * b
+                elif operator == "+":
+                    values[target] = a + b
+                elif operator == "-":
+                    values[target] = a - b
+                elif operator == "/" and b != 0:
+                    values[target] = a / b
+            except (TypeError, ArithmeticError):
+                continue
+
+    def _fix_orderings(self, table: Table, values: dict[str, Any]) -> None:
+        for left, right, strict in self.rules[table.key].orderings:
+            first = values.get(left)
+            second = values.get(right)
+            if first is None or second is None:
+                continue
+            try:
+                satisfied = first > second or (not strict and first == second)
+            except TypeError:
+                continue
+            if satisfied:
+                continue
+            try:
+                if isinstance(second, datetime):
+                    values[left] = second + timedelta(seconds=1 if strict else 0)
+                elif isinstance(second, date):
+                    values[left] = second + timedelta(days=1 if strict else 0)
+                elif isinstance(second, Decimal):
+                    values[left] = second + Decimal(1 if strict else 0)
+                elif isinstance(second, int):
+                    values[left] = second + (1 if strict else 0)
+                elif isinstance(second, float):
+                    values[left] = second + (1.0 if strict else 0.0)
+            except TypeError:
+                continue
+
+    # ------------------------------------------------------------- values
+    def _value(self, column: Column, table: Table, index: int, rng: random.Random) -> Any:
+        if column.nullable and rng.random() < 0.02:
+            return None
+
+        if column.enum_values:
+            return rng.choice(column.enum_values)
+
+        semantic = column.semantic or infer_semantic(column)
+        kind = column.data_kind
+
+        if kind in (DataKind.SMALLINT, DataKind.INT, DataKind.BIGINT):
+            value = self._int_value(semantic, index, rng)
+        elif kind == DataKind.NUMERIC:
+            value = self._numeric_value(semantic, rng)
+        elif kind == DataKind.FLOAT:
+            value = float(self._numeric_value(semantic, rng))
+        elif kind == DataKind.BOOLEAN:
+            value = rng.random() < 0.5
+        elif kind == DataKind.UUID:
+            value = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{self.plan.seed}:{table.key}:{column.name}:{index}"))
+        elif kind == DataKind.DATE:
+            value = self._date_value(semantic, rng)
+        elif kind in (DataKind.TIMESTAMP, DataKind.TIMESTAMPTZ):
+            value = self._timestamp_value(semantic, rng)
+        elif kind == DataKind.TIME:
+            value = time(rng.randint(0, 23), rng.randint(0, 59), rng.randint(0, 59))
+        elif kind == DataKind.JSON:
+            value = '{"source": "pgproof", "synthetic": true}'
+        elif kind == DataKind.BYTEA:
+            value = "\\x" + b"pgproof".hex()
+        elif kind == DataKind.INET:
+            value = f"192.168.{rng.randint(0, 255)}.{rng.randint(1, 254)}"
+        elif kind == DataKind.ARRAY:
+            value = "{}"
+        elif kind == DataKind.TEXT:
+            value = self._text_value(column, table, index, semantic, rng)
+        else:
+            value = f"{column.name}_{index}"
+
+        return self._unique_value(
+            table, column, index, self._apply_rules(column, value, self.rules[table.key], rng)
+        )
+
+    def _unique_value(self, table: Table, column: Column, index: int, value: Any) -> Any:
+        """Make single-column unique values unique by construction.
+
+        Truncation to a varchar length is the classic way to turn unique values
+        into duplicates, so the discriminator is appended after truncation.
+        """
+        if value is None or isinstance(value, bool):
+            return value
+        if column.name not in self._unique_columns.get(table.key, set()):
+            return value
+        if isinstance(value, (int, float, Decimal)):
+            return value
+        if isinstance(value, str):
+            suffix = f"-{index + 1}"
+            limit = column.max_length or 64
+            if len(value) + len(suffix) > limit:
+                value = value[: max(0, limit - len(suffix))]
+            return (value + suffix)[:limit]
+        return value
+
+    def _int_value(self, semantic: str | None, index: int, rng: random.Random) -> int:
+        if semantic == "quantity":
+            return rng.randint(1, 100)
+        if semantic == "percentage":
+            return rng.randint(0, 100)
+        if semantic == "amount":
+            return rng.randint(1, 100_000)
+        return rng.randint(1, 100_000)
+
+    def _numeric_value(self, semantic: str | None, rng: random.Random) -> Decimal:
+        if semantic == "percentage":
+            return Decimal(str(round(rng.uniform(0, 100), 2)))
+        if semantic == "quantity":
+            return Decimal(rng.randint(1, 100))
+        return Decimal(str(round(rng.uniform(1, 100_000), 2)))
+
+    def _date_value(self, semantic: str | None, rng: random.Random) -> date:
+        return _BASE_DATE - timedelta(days=rng.randint(0, 730))
+
+    def _timestamp_value(self, semantic: str | None, rng: random.Random) -> datetime:
+        return _BASE_DATETIME - timedelta(seconds=rng.randint(0, 63_072_000))
+
+    def _text_value(
+        self,
+        column: Column,
+        table: Table,
+        index: int,
+        semantic: str | None,
+        rng: random.Random,
+    ) -> str:
+        first = rng.choice(_FIRST_NAMES)
+        last = rng.choice(_LAST_NAMES)
+
+        if semantic == "email":
+            value = f"{_slug(first)}.{_slug(last)}{index}@{rng.choice(_DOMAINS)}"
+        elif semantic == "first_name":
+            value = first
+        elif semantic == "last_name":
+            value = last
+        elif semantic == "full_name":
+            value = f"{first} {last}"
+        elif semantic == "phone":
+            value = f"+52 55 {rng.randint(1000, 9999)} {rng.randint(1000, 9999)}"
+        elif semantic == "rfc":
+            value = (
+                f"{rng.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ')}{rng.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ')}"
+                f"{rng.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ')}{rng.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ')}"
+                f"{rng.randint(0, 999999):06d}"
+                f"{rng.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')}"
+                f"{rng.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')}"
+                f"{rng.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')}"
+            )
+        elif semantic == "curp":
+            value = (
+                f"{rng.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ') * 4}"
+                f"{rng.randint(0, 991231):06d}"
+                f"{rng.choice('HM')}"
+                f"{rng.choice(['DF', 'MC', 'NL', 'JC', 'PL'])}"
+                f"{rng.choice('BCDFGHJKLMNÑPQRSTVWXYZ') * 3}"
+                f"{rng.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')}"
+                f"{rng.randint(0, 9)}"
+            )
+        elif semantic == "clabe":
+            value = f"{rng.randint(0, 999):03d}{rng.randint(0, 10**15 - 1):015d}"
+        elif semantic == "address":
+            value = f"{rng.choice(_STREETS)} {rng.randint(1, 2000)}, Col. Centro"
+        elif semantic == "city":
+            value = rng.choice(_CITIES)
+        elif semantic == "region":
+            value = rng.choice(_REGIONS)
+        elif semantic == "country":
+            value = rng.choice(_COUNTRIES)
+        elif semantic == "postal_code":
+            value = f"{rng.randint(0, 99999):05d}"
+        elif semantic == "company":
+            value = rng.choice(_COMPANIES)
+        elif semantic == "url":
+            value = f"https://{_slug(rng.choice(_COMPANIES))}.example.com"
+        elif semantic == "ip":
+            value = f"192.168.{rng.randint(0, 255)}.{rng.randint(1, 254)}"
+        elif semantic == "username":
+            value = f"{_slug(first)}.{_slug(last)}{index}"
+        elif semantic == "slug":
+            value = f"{_slug(first)}-{_slug(last)}-{index}"
+        elif semantic == "code":
+            value = f"{column.name[:3].upper()}-{index + 1:06d}"
+        elif semantic == "status":
+            value = rng.choice(["active", "inactive", "pending"])
+        elif semantic == "description":
+            value = rng.choice(_LOREM)
+        elif semantic == "title":
+            value = f"{rng.choice(_LOREM).split('.')[0]} {index + 1}"
+        else:
+            value = f"{table.name}_{column.name}_{index + 1}"
+
+        limit = column.max_length
+        if limit and len(value) > limit:
+            value = value[:limit]
+        return value
+
+    def _apply_rules(
+        self, column: Column, value: Any, rules: LocalRules, rng: random.Random
+    ) -> Any:
+        if value is None:
+            return None
+
+        low, high = rules.ranges.get(column.name, (None, None))
+        if low is not None or high is not None:
+            if isinstance(value, (int, float, Decimal)):
+                numeric = Decimal(str(value))
+                if low is not None and numeric < Decimal(str(low)):
+                    numeric = Decimal(str(low))
+                if high is not None and numeric > Decimal(str(high)):
+                    numeric = Decimal(str(high))
+                if isinstance(value, int):
+                    return int(numeric)
+                if isinstance(value, float):
+                    return float(numeric)
+                return numeric
+
+        allowed = rules.allowed.get(column.name)
+        if allowed and isinstance(value, str) and value not in allowed:
+            value = sorted(allowed)[rng.randrange(len(allowed))]
+
+        limit = rules.maxlen.get(column.name)
+        if limit and isinstance(value, str) and len(value) > limit:
+            value = value[:limit]
+
+        return value
+
+    # ---------------------------------------------------------- validation
+    def validate_row(self, table: Table, row: tuple[Any, ...]) -> str | None:
+        columns = table.writable_columns
+        rules = self.rules[table.key]
+        by_name = {column.name: value for column, value in zip(columns, row)}
+
+        for column in columns:
+            value = by_name[column.name]
+            if value is None:
+                if not column.nullable:
+                    return f"{column.name} is NOT NULL"
+                continue
+            if column.enum_values and value not in column.enum_values:
+                return f"{column.name}={value!r} is not a valid enum value"
+            if isinstance(value, str):
+                limit = column.max_length
+                if limit and len(value) > limit:
+                    return f"{column.name} exceeds {limit} characters"
+                rule_limit = rules.maxlen.get(column.name)
+                if rule_limit and len(value) > rule_limit:
+                    return f"{column.name} exceeds check length {rule_limit}"
+                allowed = rules.allowed.get(column.name)
+                if allowed and value not in allowed:
+                    return f"{column.name}={value!r} is not in {sorted(allowed)}"
+            low, high = rules.ranges.get(column.name, (None, None))
+            if low is not None or high is not None:
+                if isinstance(value, (int, float, Decimal)):
+                    numeric = Decimal(str(value))
+                    if low is not None and numeric < Decimal(str(low)):
+                        return f"{column.name}={value} is below {low}"
+                    if high is not None and numeric > Decimal(str(high)):
+                        return f"{column.name}={value} is above {high}"
+        return None
+
+    def generate_validated(self, table: Table, attempts: int = 50) -> Iterator[tuple[Any, ...]]:
+        columns = table.writable_columns
+        rows = self.plan.tables[table.key].rows
+        for index in range(rows):
+            last_error = "unknown"
+            for _ in range(attempts):
+                row = self._make_row(table, columns, index)
+                error = self.validate_row(table, row)
+                if error is None:
+                    break
+                last_error = error
+            else:
+                raise GenerationError(
+                    f"{table.key} row {index + 1}: could not satisfy local rules "
+                    f"after {attempts} attempts ({last_error})"
+                )
+            yield row

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pgproof — synthetic Postgres data that ships with proof</title>
+<style>
+  :root {
+    --paper: #FAFAF7; --ink: #101418; --rule: #D9D9D2; --muted: #5B6470;
+    --pass: #1E6B45; --fail: #A32020; --warn: #8A5A00; --link: #0B3A6B;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 16px/1.6 "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  main { max-width: 960px; margin: 0 auto; padding: 64px 24px 96px; }
+  h1 { font-size: 38px; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 16px; }
+  h2 { font-size: 20px; margin: 56px 0 12px; }
+  p { max-width: 68ch; }
+  .sub { font-size: 19px; color: var(--muted); margin: 0 0 28px; }
+  a { color: var(--link); }
+  .cta { display: inline-block; background: var(--ink); color: var(--paper);
+         padding: 12px 18px; text-decoration: none; border-radius: 2px; font-weight: 600; }
+  .cta.secondary { background: transparent; color: var(--ink); border: 1px solid var(--rule); margin-left: 10px; }
+  .note { font-size: 13px; color: var(--muted); margin-top: 12px; }
+  pre, code, .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  pre { background: #F1F1EC; border: 1px solid var(--rule); padding: 16px; overflow-x: auto; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); font-size: 14px; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .pass { color: var(--pass); font-weight: 600; }
+  .fail { color: var(--fail); font-weight: 600; }
+  .warn { color: var(--warn); font-weight: 600; }
+  ul { padding-left: 20px; }
+  li { margin: 4px 0; }
+  footer { margin-top: 72px; padding-top: 16px; border-top: 1px solid var(--rule);
+           color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+
+  <h1>Synthetic Postgres data that ships with proof.</h1>
+  <p class="sub">
+    pgproof reads your schema, generates rows, and verifies every constraint it can find.
+    The output is a report you can hand to a reviewer or an auditor — including what it could not verify.
+  </p>
+  <a class="cta" href="#install">Install the CLI</a>
+  <a class="cta secondary" href="../proof/report.html">Open a real report</a>
+  <p class="note">No signup. The report above is a real run, limitations included.</p>
+
+  <h2>Your staging data passes tests because nobody checks the constraints.</h2>
+  <p>
+    Copying production is a legal risk. Faker-style seeds produce plausible values that
+    break foreign keys, sums and enum domains — the failure shows up as a flaky test
+    or a demo that dies on stage.
+  </p>
+  <p>
+    pgproof treats the schema as the specification. It reads <code>pg_catalog</code>,
+    turns constraints into invariants, generates rows that satisfy them, and then proves it.
+  </p>
+
+  <h2>It reads your schema. You do not describe it twice.</h2>
+  <pre><code>$ pgproof run --rows 400000 --seed 42 --out proof
+
+pgproof 0.1.0 · 14 tables · 400,000 rows · seed 42
+  generate billing.accounts            12,000 rows   0.31s
+  generate billing.invoices            48,000 rows   1.84s
+  generate billing.invoice_lines      180,000 rows   6.02s
+  ...
+RESULT PASS · 92 passed · 0 failed · 0 errors · 1 skipped · 0 violations
+report proof/report.html   digest sha256:bc4ba84a…</code></pre>
+
+  <h2>Every row accounted for. Every constraint named.</h2>
+  <table>
+    <thead><tr><th>Status</th><th>Kind</th><th>Table</th><th>Description</th><th>Violations</th></tr></thead>
+    <tbody>
+      <tr><td class="pass">PASS</td><td>check</td><td>billing.invoice_lines</td><td>amount = quantity * unit_price</td><td>0</td></tr>
+      <tr><td class="pass">PASS</td><td>foreign_key</td><td>billing.payments</td><td>invoice_id references invoices</td><td>0</td></tr>
+      <tr><td class="pass">PASS</td><td>enum</td><td>billing.invoices</td><td>status ∈ {draft, open, paid, void}</td><td>0</td></tr>
+      <tr><td class="warn">SKIPPED</td><td>trigger</td><td>billing.accounts</td><td>trigger effects are not replayed in v1</td><td>—</td></tr>
+    </tbody>
+  </table>
+  <p class="note">
+    Declared, inferred and skipped are separate states. What we do not verify is printed in the report.
+  </p>
+
+  <h2>Same seed, same rows. Exit codes that fail builds.</h2>
+  <p>
+    Generation is deterministic and the report carries a SHA-256 of the dataset.
+    Commit the plan, pin the version, and let CI fail when an invariant breaks.
+  </p>
+
+  <h2 id="install">Install</h2>
+  <pre><code>pipx install pgproof
+
+export PGPROOF_SOURCE_DSN=postgresql:///myapp
+export PGPROOF_TARGET_DSN=postgresql:///myapp_test
+
+pgproof run --rows 5000 --seed 42 --spec plan.yml --out proof</code></pre>
+  <p class="note">Requires Python 3.11+ and PostgreSQL 14–17. Runs fully offline.</p>
+
+  <h2>Price</h2>
+  <p>
+    The CLI is free and local. The hosted report archive, CI history and SSO are
+    paid plans. One price, published limits, no sales call.
+  </p>
+  <p><a href="#">Read the limitations</a> · <a href="#">Security</a> · <a href="#">Changelog</a></p>
+
+  <footer>
+    pgproof. Synthetic data is not production data. The report says exactly what was checked.
+  </footer>
+</main>
+</body>
+</html>

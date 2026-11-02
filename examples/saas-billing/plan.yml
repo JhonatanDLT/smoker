@@ -1,0 +1,25 @@
+# Application-level rules that the database cannot express as a constraint.
+# pgproof verifies these against the generated dataset and reports each one
+# separately from the declared constraints.
+
+invariants:
+  - id: invoice_lines_amount_matches
+    table: billing.invoice_lines
+    description: amount equals quantity times unit_price
+    sql: |
+      SELECT id FROM billing.invoice_lines
+      WHERE amount <> quantity * unit_price
+
+  - id: invoices_due_after_issue
+    table: billing.invoices
+    description: due date is never before issue date
+    sql: |
+      SELECT id FROM billing.invoices
+      WHERE due_at < issued_at
+
+  - id: subscriptions_dates_ordered
+    table: billing.subscriptions
+    description: a subscription that ends does so after it starts
+    sql: |
+      SELECT id FROM billing.subscriptions
+      WHERE ends_at IS NOT NULL AND ends_at <= started_at
