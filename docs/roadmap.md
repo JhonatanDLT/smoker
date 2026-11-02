@@ -2,7 +2,7 @@
 
 The order is deliberate: each phase is funded by the previous one.
 
-## v0.1 — Core (current)
+## v0.1 — Core (delivered)
 
 - PostgreSQL 14–17 introspection.
 - Invariants from constraints, enums and checks.
@@ -12,6 +12,9 @@ The order is deliberate: each phase is funded by the previous one.
 - YAML spec for application rules.
 - JSON + HTML verification report.
 - CLI: `introspect`, `plan`, `generate`, `verify`, `run`.
+- Structured load errors: table, constraint, SQLSTATE, row and values.
+- Four fixtures: SaaS billing, e-commerce, multi-tenant CRM, analytics.
+- Clean architecture: ports, use cases and adapters, enforced by tests.
 
 ## v0.2 — Sellable (weeks 3–6)
 

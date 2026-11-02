@@ -45,7 +45,7 @@ def test_local_rules_range_and_ordering() -> None:
         ],
     )
     rules = parse_local_rules(table)
-    assert rules.ranges["quantity"] == (0.0, None)
+    assert rules.ranges["quantity"] == (0.0, None, True, False)
     assert ("ends_at", "starts_at", True) in rules.orderings
 
 

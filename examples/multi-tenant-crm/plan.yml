@@ -1,0 +1,23 @@
+invariants:
+  - id: deals_probability_range
+    table: crm.deals
+    description: probability stays between 0 and 100
+    sql: |
+      SELECT id FROM crm.deals
+      WHERE probability < 0 OR probability > 100
+
+  - id: subscriptions_renews_after_start
+    table: crm.subscriptions
+    description: a subscription renews after it starts
+    sql: |
+      SELECT id FROM crm.subscriptions
+      WHERE renews_at <= started_at
+
+  - id: contacts_belong_to_tenant
+    table: crm.contacts
+    description: a contact's company belongs to the same tenant
+    sql: |
+      SELECT c.id
+      FROM crm.contacts c
+      JOIN crm.companies co ON co.id = c.company_id
+      WHERE co.tenant_id <> c.tenant_id

@@ -7,12 +7,13 @@ random source is seeded from (plan.seed, table, column).
 
 from __future__ import annotations
 
+import math
 import random
 import re
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -26,7 +27,7 @@ class GenerationError(RuntimeError):
 
 
 _BASE_DATE = date(2025, 1, 1)
-_BASE_DATETIME = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+_BASE_DATETIME = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
 
 _FIRST_NAMES = [
     "Ana", "Luis", "María", "Carlos", "Sofía", "Jorge", "Elena", "Miguel",
@@ -63,6 +64,12 @@ def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
 
 
+def _freeze(value: Any) -> Any:
+    if isinstance(value, (list, dict, set)):
+        return repr(value)
+    return value
+
+
 @dataclass
 class GeneratedTable:
     key: str
@@ -80,10 +87,47 @@ class Generator:
         self.pools: dict[tuple[str, tuple[str, ...]], list[tuple[Any, ...]]] = {}
         self._rngs: dict[str, random.Random] = {}
         self._unique_columns: dict[str, set[str]] = {}
+        self._unique_keys: dict[str, list[tuple[str, ...]]] = {}
+        self._seen_keys: dict[tuple[str, tuple[str, ...]], set[tuple]] = {}
         for table in catalog.tables:
             self._unique_columns[table.key] = {
                 unique.columns[0] for unique in table.uniques if len(unique.columns) == 1
             }
+            self._unique_keys[table.key] = [tuple(unique.columns) for unique in table.uniques]
+        self.scoped_fks: dict[tuple[str, str], tuple[tuple[str, ...], tuple[str, ...]]] = {}
+        self.scope_specs: dict[str, list[tuple[tuple[str, ...], tuple[str, ...]]]] = {}
+        self.scope_index: dict[
+            tuple[str, tuple[str, ...], tuple[str, ...]], list[tuple[tuple, tuple]]
+        ] = {}
+        for table in catalog.tables:
+            child_names = {column.name for column in table.columns}
+            child_fk_columns = {
+                column for fk in table.foreign_keys for column in fk.child_columns
+            }
+            for fk in table.foreign_keys:
+                parent = catalog.table(fk.parent_key)
+                parent_names = {column.name for column in parent.columns}
+                parent_fk_columns = {
+                    column for parent_fk in parent.foreign_keys for column in parent_fk.child_columns
+                }
+                # A scope column is shared by both tables and is itself a
+                # foreign key in both (e.g. tenant_id). This deliberately
+                # ignores common columns such as id or name, which are not
+                # scopes and must never be overwritten.
+                shared = tuple(
+                    sorted(
+                        (child_names & parent_names & child_fk_columns & parent_fk_columns)
+                        - set(fk.child_columns)
+                    )
+                )
+                if not shared:
+                    continue
+                parent_columns = tuple(fk.parent_columns)
+                self.scoped_fks[(table.key, fk.name)] = (shared, parent_columns)
+                specs = self.scope_specs.setdefault(fk.parent_key, [])
+                spec = (parent_columns, shared)
+                if spec not in specs:
+                    specs.append(spec)
         self._build_pools()
 
     # ------------------------------------------------------------------ rng
@@ -155,8 +199,15 @@ class Generator:
                 values[name] = value
 
         nullable = {column.name: column.nullable for column in table.columns}
-        for fk in table.foreign_keys:
+        ordered_fks = sorted(
+            table.foreign_keys,
+            key=lambda fk: (table.key, fk.name) in self.scoped_fks,
+        )
+        for fk in ordered_fks:
             if all(name in values for name in fk.child_columns):
+                continue
+            scope = self.scoped_fks.get((table.key, fk.name))
+            if scope and self._assign_scoped_fk(fk, scope, values, nullable, rng):
                 continue
             pool = self.pools.get((fk.parent_key, tuple(fk.parent_columns)))
             if not pool:
@@ -202,6 +253,59 @@ class Generator:
                     values[target] = a / b
             except (TypeError, ArithmeticError):
                 continue
+
+    def _assign_scoped_fk(
+        self,
+        fk,
+        scope: tuple[tuple[str, ...], tuple[str, ...]],
+        values: dict[str, Any],
+        nullable: dict[str, bool],
+        rng: random.Random,
+    ) -> bool:
+        """Keep a child's scope columns consistent with the row it references.
+
+        A multi-tenant child (``tenant_id``) that points at a parent which also
+        has ``tenant_id`` must reference a parent from the same tenant. When the
+        parent has no row for that tenant we adopt the parent's scope instead,
+        which keeps the foreign key valid.
+        """
+        scope_columns, parent_columns = scope
+        entries = self.scope_index.get((fk.parent_key, parent_columns, scope_columns))
+        if not entries:
+            return False
+
+        if all(nullable.get(name, True) for name in fk.child_columns) and rng.random() < 0.04:
+            for name in fk.child_columns:
+                values[name] = None
+            return True
+
+        current = tuple(values.get(name) for name in scope_columns)
+        matching = (
+            [entry for entry in entries if entry[0] == current]
+            if all(value is not None for value in current)
+            else []
+        )
+        candidates = matching or entries
+        chosen = candidates[rng.randrange(len(candidates))]
+        for name, value in zip(scope_columns, chosen[0]):
+            values[name] = value
+        for name, value in zip(fk.child_columns, chosen[1]):
+            values[name] = value
+        return True
+
+    def _index_scope(self, table: Table, row: tuple[Any, ...]) -> None:
+        specs = self.scope_specs.get(table.key)
+        if not specs:
+            return
+        names = [column.name for column in table.writable_columns]
+        values = dict(zip(names, row))
+        for key_columns, scope_columns in specs:
+            entry = (
+                tuple(values.get(name) for name in scope_columns),
+                tuple(values.get(name) for name in key_columns),
+            )
+            index_key = (table.key, key_columns, scope_columns)
+            self.scope_index.setdefault(index_key, []).append(entry)
 
     def _fix_orderings(self, table: Table, values: dict[str, Any]) -> None:
         for left, right, strict in self.rules[table.key].orderings:
@@ -399,19 +503,23 @@ class Generator:
         if value is None:
             return None
 
-        low, high = rules.ranges.get(column.name, (None, None))
-        if low is not None or high is not None:
-            if isinstance(value, (int, float, Decimal)):
-                numeric = Decimal(str(value))
-                if low is not None and numeric < Decimal(str(low)):
-                    numeric = Decimal(str(low))
-                if high is not None and numeric > Decimal(str(high)):
-                    numeric = Decimal(str(high))
-                if isinstance(value, int):
-                    return int(numeric)
-                if isinstance(value, float):
-                    return float(numeric)
-                return numeric
+        low, high, low_strict, high_strict = rules.ranges.get(
+            column.name, (None, None, False, False)
+        )
+        if (low is not None or high is not None) and isinstance(value, (int, float, Decimal)):
+            numeric = Decimal(str(value))
+            low_decimal = Decimal(str(low)) if low is not None else None
+            high_decimal = Decimal(str(high)) if high is not None else None
+            below = low_decimal is not None and (
+                numeric < low_decimal or (low_strict and numeric == low_decimal)
+            )
+            above = high_decimal is not None and (
+                numeric > high_decimal or (high_strict and numeric == high_decimal)
+            )
+            if below or above:
+                value = self._sample_in_range(
+                    column, low, high, low_strict, high_strict, rng
+                )
 
         allowed = rules.allowed.get(column.name)
         if allowed and isinstance(value, str) and value not in allowed:
@@ -422,6 +530,27 @@ class Generator:
             value = value[:limit]
 
         return value
+
+    def _sample_in_range(
+        self,
+        column: Column,
+        low: float | None,
+        high: float | None,
+        low_strict: bool,
+        high_strict: bool,
+        rng: random.Random,
+    ) -> Any:
+        is_int = column.data_kind in (DataKind.SMALLINT, DataKind.INT, DataKind.BIGINT)
+        lo = float(low) if low is not None else 0.0
+        hi = float(high) if high is not None else lo + 100_000.0
+        if low_strict:
+            lo += 1.0 if is_int else 0.01
+        if high_strict:
+            hi -= 1.0 if is_int else 0.01
+        hi = max(hi, lo)
+        if is_int:
+            return rng.randint(math.ceil(lo), math.floor(hi))
+        return Decimal(str(round(rng.uniform(lo, hi), 2)))
 
     # ---------------------------------------------------------- validation
     def validate_row(self, table: Table, row: tuple[Any, ...]) -> str | None:
@@ -447,14 +576,23 @@ class Generator:
                 allowed = rules.allowed.get(column.name)
                 if allowed and value not in allowed:
                     return f"{column.name}={value!r} is not in {sorted(allowed)}"
-            low, high = rules.ranges.get(column.name, (None, None))
-            if low is not None or high is not None:
-                if isinstance(value, (int, float, Decimal)):
-                    numeric = Decimal(str(value))
-                    if low is not None and numeric < Decimal(str(low)):
-                        return f"{column.name}={value} is below {low}"
-                    if high is not None and numeric > Decimal(str(high)):
-                        return f"{column.name}={value} is above {high}"
+            low, high, low_strict, high_strict = rules.ranges.get(
+                column.name, (None, None, False, False)
+            )
+            if (low is not None or high is not None) and isinstance(
+                value, (int, float, Decimal)
+            ):
+                numeric = Decimal(str(value))
+                if low is not None and (
+                    numeric < Decimal(str(low))
+                    or (low_strict and numeric == Decimal(str(low)))
+                ):
+                    return f"{column.name}={value} violates > {low}"
+                if high is not None and (
+                    numeric > Decimal(str(high))
+                    or (high_strict and numeric == Decimal(str(high)))
+                ):
+                    return f"{column.name}={value} violates < {high}"
         return None
 
     def generate_validated(self, table: Table, attempts: int = 50) -> Iterator[tuple[Any, ...]]:
@@ -464,6 +602,7 @@ class Generator:
             last_error = "unknown"
             for _ in range(attempts):
                 row = self._make_row(table, columns, index)
+                row = self._enforce_unique_keys(table, row, index)
                 error = self.validate_row(table, row)
                 if error is None:
                     break
@@ -473,4 +612,59 @@ class Generator:
                     f"{table.key} row {index + 1}: could not satisfy local rules "
                     f"after {attempts} attempts ({last_error})"
                 )
+            self._index_scope(table, row)
             yield row
+
+    def _enforce_unique_keys(
+        self, table: Table, row: tuple[Any, ...], index: int
+    ) -> tuple[Any, ...]:
+        """Make composite unique keys unique by construction.
+
+        Single-column uniques are handled at value time; composite keys are
+        checked here because a collision only appears when the tuple is built.
+        """
+        key_columns_list = self._unique_keys.get(table.key, [])
+        if not key_columns_list:
+            return row
+        columns = table.writable_columns
+        names = [column.name for column in columns]
+        values = dict(zip(names, row))
+
+        for key_columns in key_columns_list:
+            if not key_columns:
+                continue
+            store_key = (table.key, key_columns)
+            seen = self._seen_keys.setdefault(store_key, set())
+            signature = tuple(_freeze(values.get(name)) for name in key_columns)
+            if signature not in seen:
+                seen.add(signature)
+                continue
+
+            candidates = [name for name in key_columns if isinstance(values.get(name), str)]
+            if not candidates:
+                candidates = [
+                    name
+                    for name in key_columns
+                    if not any(name in fk.child_columns for fk in table.foreign_keys)
+                ]
+            if not candidates:
+                continue
+
+            target = candidates[0]
+            base = str(values.get(target) or "")
+            limit = table.column(target).max_length or 64
+            counter = 0
+            while True:
+                suffix = f"-{index + 1}" if counter == 0 else f"-{index + 1}-{counter}"
+                candidate = (base[: max(0, limit - len(suffix))] + suffix)[:limit]
+                signature = tuple(
+                    _freeze(candidate if name == target else values.get(name))
+                    for name in key_columns
+                )
+                if signature not in seen or counter > 100:
+                    break
+                counter += 1
+            values[target] = candidate
+            seen.add(signature)
+
+        return tuple(values.get(name) for name in names)

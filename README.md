@@ -116,7 +116,39 @@ CI.
 - Foreign keys, including composite keys
 - `CHECK` constraints, including arithmetic and column-to-column comparisons
 - Enum domains
+- Composite unique keys
 - Application rules declared in `--spec`
+
+## Fixtures
+
+Three public schemas exercise different features:
+
+| Fixture | What it covers |
+|---|---|
+| `examples/saas-billing` | Enums, self-reference, trigger inventory, derived column |
+| `examples/ecommerce` | Unique `varchar` truncation, ranges, nullable ordering |
+| `examples/multi-tenant-crm` | Composite keys, scope-aware tenant foreign keys |
+| `examples/analytics` | JSONB, bounded decimals, timestamp ordering |
+
+```bash
+make fixtures   # creates one database per fixture and writes proof/<fixture>/
+```
+
+## Errors
+
+A failed load names the table, constraint, row and values:
+
+```
+load failed in debug.bad
+  reason:     new row for relation "bad" violates check constraint "name_fixed"
+  constraint: name_fixed
+  sqlstate:   23514
+  row:        1
+  values:     id=1, name='Jorge Flores'
+  detail:     Failing row contains (1, Jorge Flores).
+```
+
+`pgproof` exits `2` on a load error and `1` on a verification failure.
 
 ## What it does not verify (yet)
 
@@ -145,13 +177,17 @@ is worse than no certificate.**
 ## Architecture
 
 ```
-cli ──► core (pure) ◄── adapters/postgres
+cli ──► application ──► core (domain + ports)
+                         ▲
+                    adapters (Postgres, YAML, report)
 ```
 
-`core` has no database driver, no CLI, and no I/O. That is what makes a second
-dialect (SQL Server) an adapter, not a rewrite.
+The core has no database driver, no CLI and no I/O. That is what makes a second
+dialect (SQL Server) an adapter, not a rewrite. The dependency rule is enforced
+by `tests/test_architecture.py`.
 
-See [`docs/architecture.md`](docs/architecture.md).
+See [`docs/architecture.md`](docs/architecture.md) for the ports and the SOLID
+mapping.
 
 ---
 

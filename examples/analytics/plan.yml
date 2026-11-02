@@ -1,0 +1,21 @@
+invariants:
+  - id: sessions_ended_after_started
+    table: analytics.sessions
+    description: a session ends after it starts
+    sql: |
+      SELECT id FROM analytics.sessions
+      WHERE ended_at <= started_at
+
+  - id: variants_weight_range
+    table: analytics.variants
+    description: variant weights stay between 0 and 1
+    sql: |
+      SELECT id FROM analytics.variants
+      WHERE weight < 0 OR weight > 1
+
+  - id: metrics_non_negative
+    table: analytics.metrics
+    description: metrics are never negative
+    sql: |
+      SELECT id FROM analytics.metrics
+      WHERE value < 0

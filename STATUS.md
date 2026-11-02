@@ -2,7 +2,8 @@
 
 **Date:** 2026-11-02
 **Version:** 0.1.0
-**State:** working v1 core, tested end to end against PostgreSQL 16.
+**State:** working v1 core, four fixture schemas, clean-architecture guardrails,
+tested end to end against PostgreSQL 16.
 
 ---
 
@@ -16,22 +17,34 @@
 | Deterministic generation (seed per table) | ✅ |
 | Pre-allocated keys (foreign-key cycles) | ✅ |
 | Local rules: ranges, `IN`, `a = b * c`, `ends_at > starts_at` | ✅ |
+| Composite unique keys | ✅ |
+| Scope-aware foreign keys (`tenant_id`) | ✅ |
 | Unique values after `varchar(n)` truncation | ✅ |
 | `COPY` writer with `INSERT` fallback | ✅ |
 | Independent verifier with violation samples | ✅ |
+| Structured load errors (table, constraint, row, values, SQLSTATE) | ✅ |
 | JSON + HTML report with limitations | ✅ |
 | Dataset SHA-256 (reproducibility) | ✅ |
 | CLI: `introspect`, `plan`, `generate`, `verify`, `run` | ✅ |
-| Exit code 1 on `FAIL` (CI-ready) | ✅ |
+| Clean architecture: ports, use cases, adapters | ✅ |
+| Architecture guards in the test suite | ✅ |
+| Ruff clean | ✅ |
+
+## Fixtures
+
+| Fixture | Invariants | Result |
+|---|---|---|
+| `saas-billing` | 93 | PASS |
+| `ecommerce` | 92 | PASS |
+| `multi-tenant-crm` | 79 | PASS |
+| `analytics` | 74 | PASS |
 
 ## Measured
 
-- 10-table demo schema, 180,000 rows generated and verified in **5.04 s**.
-- 92 invariants passed, 0 violations, 1 skipped (trigger).
-- Two runs with the same seed produce the same dataset hash:
-  `bc4ba84aa1c655cf1543469b1aa6e7c6ca518cd60fff7c321f592d8e0fe3a0db`.
-- Unit tests: 16 passing.
-- Integration tests: 2 passing against a live PostgreSQL 16.
+- 10-table billing schema, 180,000 rows generated and verified in **5.04 s**.
+- Same seed produces the same dataset hash every run.
+- **24 tests passing**: 13 unit, 8 integration, 3 architecture.
+- Fixture runner creates one database per schema and writes a report for each.
 
 ## How to run it
 
@@ -40,44 +53,44 @@ cd pgproof
 python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 
-createdb pgproof_demo
-psql -d pgproof_demo -f examples/saas-billing/schema.sql
-
-export PGPROOF_SOURCE_DSN=postgresql:///pgproof_demo
-export PGPROOF_TARGET_DSN=postgresql:///pgproof_demo
-
-.venv/bin/pgproof run \
-  --rows 200 \
-  --seed 42 \
-  --spec examples/saas-billing/plan.yml \
-  --out proof
-
-open proof/report.html
+make demo        # billing demo, opens proof/report.html
+make fixtures    # ecommerce, multi-tenant CRM, analytics
+make test
+PGPROOF_TEST_DSN=postgresql:///pgproof_demo .venv/bin/pytest -m integration
 ```
 
-Or simply:
+## Architecture
 
-```bash
-make demo
 ```
+cli ──► application ──► core (domain + ports)
+                         ▲
+                    adapters (Postgres, YAML, report)
+```
+
+- `core` has no third-party imports beyond the standard library.
+- `application` depends on ports, never on adapters.
+- `tests/test_architecture.py` fails the build if the rule is broken.
+- Adding SQL Server = one adapter. Adding JUnit XML = one renderer.
 
 ## Known gaps (v1, by design)
 
 - Trigger side effects are inventoried but not replayed.
 - Exclusion constraints are not generated against.
 - Cross-table business rules are verified only if declared; they are not repaired.
+- Scope detection covers shared columns that are foreign keys in both tables.
 - Partitioned tables, RLS policies, arrays and `bytea` are partial.
 - SQL Server, MySQL and static code analysis are roadmap items.
 
 See [`docs/limitations.md`](docs/limitations.md).
 
-## Next five tasks
+## Next tasks
 
-1. GitHub Action + JUnit XML output.
-2. Better failure messages: table, constraint, row, offending SQL.
-3. Three public fixture schemas (e-commerce, multi-tenant CRM, analytics).
-4. `--fail-on` policy and `--strict` mode.
-5. First design-partner pilot using the "two weeks or you do not pay" offer.
+1. JUnit XML renderer and a `--fail-on` policy (GitHub Action deliberately
+   postponed; keep the renderer ready for it).
+2. Distribution-aware generation from profiles.
+3. Repair loop for declared application rules.
+4. Partitioned table routing.
+5. First design-partner pilot with the "two weeks or you do not pay" offer.
 
 ## Decision rules
 

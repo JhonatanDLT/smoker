@@ -1,15 +1,22 @@
-"""PostgreSQL adapter."""
+"""PostgreSQL adapter.
+
+The public surface is the set of classes that implement the domain ports plus
+the introspection helper.
+"""
 
 from .introspect import connect, introspect, table_counts
 from .profile import profile_catalog
-from .writer import reset_sequences, truncate, write_table
+from .query_runner import PostgresQueryRunner
+from .writer import PostgresRowWriter, reset_sequences, truncate, write_table
 
 __all__ = [
+    "PostgresQueryRunner",
+    "PostgresRowWriter",
     "connect",
     "introspect",
-    "table_counts",
     "profile_catalog",
     "reset_sequences",
+    "table_counts",
     "truncate",
     "write_table",
 ]

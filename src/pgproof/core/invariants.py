@@ -10,12 +10,9 @@ import hashlib
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 from typing import Any
 
-import yaml
-
-from .ir import Catalog, CheckConstraint, Column, Table, quote_ident, quote_qualified
+from .ir import Catalog, Column, Table, quote_ident, quote_qualified
 
 
 class InvariantKind(str, Enum):
@@ -103,20 +100,42 @@ _STRING_RE = re.compile(r"'((?:[^']|'')*)'")
 class LocalRules:
     """Best-effort constraints the generator can enforce without the database."""
 
-    ranges: dict[str, tuple[float | None, float | None]] = field(default_factory=dict)
+    ranges: dict[str, tuple[float | None, float | None, bool, bool]] = field(
+        default_factory=dict
+    )
     allowed: dict[str, set[str]] = field(default_factory=dict)
     maxlen: dict[str, int] = field(default_factory=dict)
     orderings: list[tuple[str, str, bool]] = field(default_factory=list)
     derived: list[tuple[str, str, str, str]] = field(default_factory=list)
     unparsed: list[str] = field(default_factory=list)
 
-    def apply_range(self, column: str, low: float | None, high: float | None) -> None:
-        current_low, current_high = self.ranges.get(column, (None, None))
+    def apply_range(
+        self,
+        column: str,
+        low: float | None,
+        high: float | None,
+        low_strict: bool = False,
+        high_strict: bool = False,
+    ) -> None:
+        current_low, current_high, current_low_strict, current_high_strict = self.ranges.get(
+            column, (None, None, False, False)
+        )
         if low is not None:
-            current_low = low if current_low is None else max(current_low, low)
+            if current_low is None or low > current_low:
+                current_low, current_low_strict = low, low_strict
+            elif low == current_low:
+                current_low_strict = current_low_strict or low_strict
         if high is not None:
-            current_high = high if current_high is None else min(current_high, high)
-        self.ranges[column] = (current_low, current_high)
+            if current_high is None or high < current_high:
+                current_high, current_high_strict = high, high_strict
+            elif high == current_high:
+                current_high_strict = current_high_strict or high_strict
+        self.ranges[column] = (
+            current_low,
+            current_high,
+            current_low_strict,
+            current_high_strict,
+        )
 
 
 def infer_semantic(column: Column) -> str | None:
@@ -162,11 +181,11 @@ def parse_local_rules(table: Table) -> LocalRules:
         for column, operator, raw_value in _RANGE_RE.findall(predicate):
             value = float(raw_value)
             if operator == ">":
-                rules.apply_range(column, value, None)
+                rules.apply_range(column, value, None, low_strict=True)
             elif operator == ">=":
                 rules.apply_range(column, value, None)
             elif operator == "<":
-                rules.apply_range(column, None, value)
+                rules.apply_range(column, None, value, high_strict=True)
             else:
                 rules.apply_range(column, None, value)
             matched = True
@@ -416,32 +435,6 @@ def _sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def invariants_from_spec(path: str | Path) -> list[Invariant]:
-    data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-    raw_invariants = data.get("invariants") or []
-    invariants: list[Invariant] = []
-    for index, raw in enumerate(raw_invariants):
-        if not isinstance(raw, dict):
-            raise ValueError(f"invariant #{index} must be a mapping")
-        sql = (raw.get("sql") or "").strip()
-        if not sql:
-            raise ValueError(f"invariant #{index} is missing `sql`")
-        identifier = raw.get("id") or f"app_rule:{index}"
-        invariants.append(
-            Invariant(
-                id=str(identifier),
-                kind=InvariantKind.APP_RULE,
-                table=str(raw.get("table", "")),
-                description=str(raw.get("description", identifier)),
-                violation_sql=sql,
-                status=InvariantStatus.DECLARED,
-                source="spec",
-                columns=list(raw.get("columns") or []),
-            )
-        )
-    return invariants
-
-
 def merge_invariants(base: list[Invariant], extra: list[Invariant]) -> list[Invariant]:
     seen = {inv.id for inv in base}
     merged = list(base)
@@ -476,10 +469,6 @@ def invariants_to_dict(invariants: list[Invariant]) -> list[dict[str, Any]]:
         }
         for inv in invariants
     ]
-
-
-def checks_from_table(table: Table) -> list[CheckConstraint]:
-    return list(table.checks)
 
 
 def semantic_for_catalog(catalog: Catalog) -> None:

@@ -1,0 +1,21 @@
+invariants:
+  - id: order_items_line_total
+    table: shop.order_items
+    description: line_total equals quantity times unit_price
+    sql: |
+      SELECT id FROM shop.order_items
+      WHERE line_total <> quantity * unit_price
+
+  - id: reviews_rating_range
+    table: shop.reviews
+    description: ratings stay between 1 and 5
+    sql: |
+      SELECT id FROM shop.reviews
+      WHERE rating < 1 OR rating > 5
+
+  - id: shipments_delivered_after_shipped
+    table: shop.shipments
+    description: a delivered shipment was delivered after it shipped
+    sql: |
+      SELECT id FROM shop.shipments
+      WHERE delivered_at IS NOT NULL AND delivered_at <= shipped_at

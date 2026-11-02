@@ -1,4 +1,9 @@
-"""Writing generated rows into PostgreSQL."""
+"""Writing generated rows into PostgreSQL.
+
+Errors are translated into ``LoadError`` with the table, constraint, row index,
+row values and SQLSTATE. The application layer may enrich the row by replaying
+the deterministic generator when PostgreSQL only gives a COPY line number.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +14,9 @@ from typing import Any
 
 import psycopg
 
+from ...core.errors import LoadError
 from ...core.ir import Table, quote_ident, quote_qualified
+from .errors import from_psycopg
 
 
 def truncate(conn: psycopg.Connection, tables: list[Table], cascade: bool = True) -> None:
@@ -55,14 +62,16 @@ def _copy_rows(
     column_list = ", ".join(quote_ident(column.name) for column in columns)
     statement = f"COPY {qualified} ({column_list}) FROM STDIN"
     count = 0
-    with conn.cursor() as cur:
-        with cur.copy(statement) as copy:
+    try:
+        with conn.cursor() as cur, cur.copy(statement) as copy:
             for row in rows:
                 line = "\t".join(_copy_text(value) for value in row) + "\n"
                 copy.write(line)
                 if hasher is not None:
                     hasher.update(line.encode("utf-8"))
                 count += 1
+    except psycopg.Error as exc:
+        raise from_psycopg(exc, table.key) from exc
     return count
 
 
@@ -77,10 +86,20 @@ def _insert_rows(
     column_list = ", ".join(quote_ident(column.name) for column in columns)
     placeholders = ", ".join(["%s"] * len(columns))
     statement = f"INSERT INTO {qualified} ({column_list}) VALUES ({placeholders})"
+    names = [column.name for column in columns]
     count = 0
     with conn.cursor() as cur:
         for row in rows:
-            cur.execute(statement, row)
+            try:
+                cur.execute(statement, row)
+            except psycopg.Error as exc:
+                raise from_psycopg(
+                    exc,
+                    table.key,
+                    row_index=count,
+                    columns=names,
+                    row=list(row),
+                ) from exc
             if hasher is not None:
                 line = "\t".join(_copy_text(value) for value in row) + "\n"
                 hasher.update(line.encode("utf-8"))
@@ -146,3 +165,44 @@ def iter_batches(rows: Iterator[tuple[Any, ...]], size: int = 5000) -> Iterator[
             batch = []
     if batch:
         yield batch
+
+
+class PostgresRowWriter:
+    """Adapter implementing the RowWriter port."""
+
+    def __init__(self, connection: psycopg.Connection) -> None:
+        self.connection = connection
+
+    def truncate(self, tables: list[Table]) -> None:
+        truncate(self.connection, tables)
+
+    def write(
+        self,
+        table: Table,
+        rows: Iterable[tuple[Any, ...]],
+        method: str = "copy",
+        hasher: Any = None,
+    ) -> int:
+        return write_table(self.connection, table, rows, method=method, hasher=hasher)
+
+    def reset_sequences(self, tables: list[Table]) -> None:
+        reset_sequences(self.connection, tables)
+
+    def commit(self) -> None:
+        self.connection.commit()
+
+    def rollback(self) -> None:
+        self.connection.rollback()
+
+    def close(self) -> None:
+        self.connection.close()
+
+
+__all__ = [
+    "LoadError",
+    "PostgresRowWriter",
+    "iter_batches",
+    "reset_sequences",
+    "truncate",
+    "write_table",
+]

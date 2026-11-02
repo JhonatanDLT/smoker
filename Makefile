@@ -13,6 +13,9 @@ test-integration:
 demo:
 	./scripts/demo.sh
 
+fixtures:
+	./scripts/run_fixtures.sh
+
 lint:
 	.venv/bin/ruff check src tests
 

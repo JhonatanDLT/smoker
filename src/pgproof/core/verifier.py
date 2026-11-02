@@ -1,21 +1,18 @@
 """Invariant verification.
 
-The verifier is deliberately independent from the generator: it receives a
-connection and a list of invariants, and counts violations. It never trusts the
-row count the generator reports.
+The verifier is pure: it depends on the ``QueryRunner`` port, never on psycopg.
+That is what lets us run the same verification against PostgreSQL today and
+SQL Server later without touching the logic.
 """
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime, time as time_value
-from decimal import Decimal
 from typing import Any
 
-import psycopg
-
 from .invariants import Invariant, InvariantStatus
+from .ports import QueryRunner
 
 
 @dataclass
@@ -60,22 +57,8 @@ class Verification:
         return "PASS" if self.failed == 0 and self.errored == 0 else "FAIL"
 
 
-def _jsonable(value: Any) -> Any:
-    if isinstance(value, (date, datetime, time_value)):
-        return value.isoformat()
-    if isinstance(value, Decimal):
-        return str(value)
-    if isinstance(value, (bytes, bytearray)):
-        return "0x" + bytes(value).hex()
-    if isinstance(value, dict):
-        return {key: _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(item) for item in value]
-    return value
-
-
 def verify_all(
-    conn: psycopg.Connection,
+    runner: QueryRunner,
     invariants: list[Invariant],
     sample_limit: int = 5,
 ) -> Verification:
@@ -99,17 +82,8 @@ def verify_all(
 
         sql = invariant.violation_sql.strip().rstrip(";")
         try:
-            with conn.cursor() as cur:
-                cur.execute(f"SELECT count(*) FROM ({sql}) AS violations")
-                violations = int(cur.fetchone()[0])
-                sample: list[dict[str, Any]] = []
-                if violations > 0 and sample_limit > 0:
-                    cur.execute(f"SELECT * FROM ({sql}) AS violations LIMIT %s", (sample_limit,))
-                    names = [description.name for description in cur.description]
-                    sample = [
-                        {name: _jsonable(value) for name, value in zip(names, row)}
-                        for row in cur.fetchall()
-                    ]
+            violations = runner.count(sql)
+            sample = runner.sample(sql, sample_limit) if violations > 0 and sample_limit > 0 else []
             results.append(
                 InvariantResult(
                     id=invariant.id,
@@ -137,32 +111,10 @@ def verify_all(
                 )
             )
 
-    with conn.cursor() as cur:
-        cur.execute("SELECT current_database(), current_setting('server_version')")
-        database, version = cur.fetchone()
-
+    database, version = runner.identity()
     return Verification(
         results=results,
         duration_seconds=round(time.perf_counter() - started, 3),
         database=database,
         server_version=version,
     )
-
-
-def structural_warnings(conn: psycopg.Connection) -> list[str]:
-    warnings: list[str] = []
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT n.nspname || '.' || c.relname || ':' || con.conname
-            FROM pg_constraint con
-            JOIN pg_class c ON c.oid = con.conrelid
-            JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE NOT con.convalidated
-              AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-            ORDER BY 1
-            """
-        )
-        for (name,) in cur.fetchall():
-            warnings.append(f"constraint {name} is NOT VALID and has not been checked on existing rows")
-    return warnings

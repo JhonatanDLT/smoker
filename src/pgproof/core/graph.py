@@ -52,7 +52,7 @@ def tarjan_scc(nodes: list[str], edges: dict[str, set[str]]) -> list[list[str]]:
         counter[0] += 1
         stack.append(node)
         on_stack[node] = True
-        for neighbour in edges.get(node, ()):  # noqa: B007
+        for neighbour in edges.get(node, ()):
             if neighbour not in index:
                 strongconnect(neighbour)
                 low[node] = min(low[node], low[neighbour])

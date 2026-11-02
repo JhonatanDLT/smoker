@@ -198,7 +198,7 @@ class Catalog:
         return to_plain(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Catalog":
+    def from_dict(cls, data: dict[str, Any]) -> Catalog:
         tables = []
         for raw in data.get("tables", []):
             columns = [Column(**{**c, "data_kind": DataKind(c["data_kind"]) if c.get("data_kind") else None}) for c in raw.get("columns", [])]

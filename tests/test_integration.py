@@ -15,6 +15,7 @@ import psycopg
 import pytest
 
 from pgproof.adapters.postgres.introspect import connect, introspect, table_counts
+from pgproof.adapters.postgres.query_runner import PostgresQueryRunner
 from pgproof.adapters.postgres.writer import reset_sequences, truncate, write_table
 from pgproof.core.generator import Generator
 from pgproof.core.invariants import invariants_from_catalog
@@ -44,7 +45,9 @@ def test_end_to_end_passes_every_invariant() -> None:
         reset_sequences(connection, catalog.tables)
         connection.commit()
 
-        verification = verify_all(connection, invariants_from_catalog(catalog))
+        verification = verify_all(
+            PostgresQueryRunner(connection), invariants_from_catalog(catalog)
+        )
         counts = table_counts(connection, catalog.table_keys)
     finally:
         connection.close()
