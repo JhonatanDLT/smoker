@@ -17,14 +17,31 @@ from ...core.ir import Table, quote_ident, quote_qualified
 from .errors import from_psycopg
 from .serialization import copy_text as _copy_text
 
+TRUNCATE_BATCH_SIZE = 100
 
-def truncate(conn: psycopg.Connection, tables: list[Table], cascade: bool = True) -> None:
+
+def truncate(
+    conn: psycopg.Connection,
+    tables: list[Table],
+    cascade: bool = True,
+    batch_size: int = TRUNCATE_BATCH_SIZE,
+) -> None:
+    """Truncate in batches.
+
+    A single ``TRUNCATE`` over thousands of tables can exhaust
+    ``max_locks_per_transaction``. Batches keep the lock footprint bounded.
+    """
     if not tables:
         return
-    targets = ", ".join(quote_qualified(table.schema, table.name) for table in tables)
     suffix = " CASCADE" if cascade else ""
+    size = max(1, batch_size)
     with conn.cursor() as cur:
-        cur.execute(f"TRUNCATE {targets}{suffix}")
+        for start in range(0, len(tables), size):
+            batch = tables[start : start + size]
+            targets = ", ".join(
+                quote_qualified(table.schema, table.name) for table in batch
+            )
+            cur.execute(f"TRUNCATE {targets}{suffix}")
 
 
 def write_table(

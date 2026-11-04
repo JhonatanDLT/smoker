@@ -4,6 +4,20 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## v0.2.1 — Scale fixes (2026-11-04)
+
+### Fixed
+
+- **Iterative Tarjan SCC.** A reverse-ordered foreign-key chain of 1,200 tables
+  no longer hits `RecursionError`. A 5,000-table chain is covered by a test.
+- **Batched `TRUNCATE`.** Tables are truncated 100 at a time, so a schema with
+  thousands of tables does not exhaust `max_locks_per_transaction`.
+
+### Measured
+
+- 1,200 tables × 1,000 rows (1.2M rows, 9,599 invariants): 28 s, 173 MB.
+- 5,000-table reverse chain: plans successfully.
+
 ## [0.2.0] — 2026-11-02
 
 ### Added

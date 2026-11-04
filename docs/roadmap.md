@@ -26,15 +26,16 @@ The order is deliberate: each phase is funded by the previous one.
 - Schema readiness audit (`pgproof audit`).
 - `docker run` one-liner. *(pending)*
 
-## v0.3 — Depth (mostly delivered)
+## v0.3 — Depth (in progress)
 
-- Distribution-aware generation from profiles (categorical, numeric, boolean).
-- Explicit repair loop with fixed-point limit and residual reporting.
+- Partitioned table routing. **Next.**
+- `TABLESAMPLE` and date histograms for profiles.
+- Column correlations. *(pending)*
+- Schema include/exclude filters. *(pending)*
+- Parallel verification and `TRUNCATE` batching. *(batching delivered in 0.2.1)*
 - More rule shapes: `BETWEEN`, `OR`, `IS NULL` implications, `LIKE` patterns.
   *(partial)*
-- Partitioned table routing. *(pending)*
-- Parallel table generation. *(pending)*
-- Column correlations. *(pending)*
+- `pgproof explain <invariant>`: why a rule exists and where it came from.
 
 ## v0.4 — SQL Server (months 4–6)
 

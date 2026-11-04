@@ -8,6 +8,10 @@ This page exists because trust is built by publishing what you do **not** do.
   primary keys, foreign keys, enum domains, and the `CHECK` constraints that the
   local rule parser understands.
 - Composite foreign keys are supported.
+- Deep foreign-key chains are supported: the SCC pass is iterative, so a
+  5,000-table chain plans without hitting Python's recursion limit.
+- `TRUNCATE` runs in batches of 100 tables, keeping the lock footprint bounded
+  on schemas with thousands of tables.
 - Composite unique keys are supported: a text column in the key receives a
   deterministic suffix when a collision appears.
 - Scope-aware foreign keys are supported when the scope column is a foreign key
@@ -30,7 +34,7 @@ This page exists because trust is built by publishing what you do **not** do.
 | Row-level security policies | ignored | Generation uses a privileged connection. |
 | Domain constraints | partially | The base type is generated; domain `CHECK`s are enforced by PostgreSQL at load time. |
 | `NOT VALID` constraints | verified, flagged | They are enforced on new rows, so we check them and warn that old rows were never validated. |
-| Partitioned tables | partial | The parent is introspected; routing depends on the partition key. Large partition sets are not optimized. |
+| Partitioned tables | **not supported** | Partitions are introspected as separate tables, so generation duplicates rows and fails with a duplicate key. Partition routing is the next correctness gap. |
 | Generated columns | excluded from writes | The database computes them. |
 | Arrays | empty array | Element type and length are not modelled. |
 | `bytea` | placeholder | Values are not meaningful. |
@@ -44,6 +48,8 @@ This page exists because trust is built by publishing what you do **not** do.
 - `--rows` is per table. Very large tables need `--table-rows` and enough disk.
 - Key pools use one tuple per row per key. A 10M-row table with a UUID primary
   key will use hundreds of MB before generating a single row.
+- Verification runs one query per invariant. It is fast for thousands of
+  invariants and linear after that; parallel verification is a v0.3 concern.
 - v1 is single-process. Parallel table generation is a v0.3 concern.
 - The tool requires a live PostgreSQL connection for anything beyond parsing a
   saved catalog.

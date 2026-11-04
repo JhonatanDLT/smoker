@@ -40,37 +40,64 @@ def build_edges(catalog: Catalog) -> dict[str, set[str]]:
 
 
 def tarjan_scc(nodes: list[str], edges: dict[str, set[str]]) -> list[list[str]]:
+    """Iterative Tarjan SCC.
+
+    The recursive version hits Python's recursion limit on deep foreign-key
+    chains (a 1,200-table reverse-ordered chain is enough). The iterative
+    version keeps an explicit work stack, so depth is bounded by memory.
+    """
     index: dict[str, int] = {}
     low: dict[str, int] = {}
     on_stack: dict[str, bool] = {}
     stack: list[str] = []
     result: list[list[str]] = []
-    counter = [0]
+    counter = 0
 
-    def strongconnect(node: str) -> None:
-        index[node] = low[node] = counter[0]
-        counter[0] += 1
-        stack.append(node)
-        on_stack[node] = True
-        for neighbour in edges.get(node, ()):
-            if neighbour not in index:
-                strongconnect(neighbour)
-                low[node] = min(low[node], low[neighbour])
-            elif on_stack.get(neighbour):
-                low[node] = min(low[node], index[neighbour])
-        if low[node] == index[node]:
-            component: list[str] = []
-            while True:
-                member = stack.pop()
-                on_stack[member] = False
-                component.append(member)
-                if member == node:
+    for root in nodes:
+        if root in index:
+            continue
+
+        index[root] = low[root] = counter
+        counter += 1
+        stack.append(root)
+        on_stack[root] = True
+        work: list[tuple[str, object, str | None]] = [
+            (root, iter(edges.get(root, ())), None)
+        ]
+
+        while work:
+            node, neighbours, parent = work[-1]
+            descended = False
+
+            for neighbour in neighbours:  # type: ignore[union-attr]
+                if neighbour not in index:
+                    index[neighbour] = low[neighbour] = counter
+                    counter += 1
+                    stack.append(neighbour)
+                    on_stack[neighbour] = True
+                    work.append((neighbour, iter(edges.get(neighbour, ())), node))
+                    descended = True
                     break
-            result.append(component)
+                if on_stack.get(neighbour):
+                    low[node] = min(low[node], index[neighbour])
 
-    for node in nodes:
-        if node not in index:
-            strongconnect(node)
+            if descended:
+                continue
+
+            work.pop()
+            if parent is not None:
+                low[parent] = min(low[parent], low[node])
+
+            if low[node] == index[node]:
+                component: list[str] = []
+                while True:
+                    member = stack.pop()
+                    on_stack[member] = False
+                    component.append(member)
+                    if member == node:
+                        break
+                result.append(component)
+
     return result
 
 

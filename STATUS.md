@@ -1,7 +1,7 @@
 # Status
 
 **Date:** 2026-11-02
-**Version:** 0.2.0
+**Version:** 0.2.1
 **State:** working v1 plus CI output, repair loop and distribution-aware
 generation. Tested end to end against PostgreSQL 16.
 
@@ -16,6 +16,8 @@ generation. Tested end to end against PostgreSQL 16.
 | Application rules from YAML spec | ✅ |
 | Deterministic generation (seed per table) | ✅ |
 | Pre-allocated keys (foreign-key cycles) | ✅ |
+| Deep foreign-key chains (iterative SCC, 5,000 tables tested) | ✅ |
+| Batched `TRUNCATE` (100 tables per statement) | ✅ |
 | Local rules: ranges, `IN`, `a = b * c`, `ends_at > starts_at` | ✅ |
 | Composite unique keys | ✅ |
 | Scope-aware foreign keys (`tenant_id`) | ✅ |
@@ -47,9 +49,12 @@ generation. Tested end to end against PostgreSQL 16.
 ## Measured
 
 - 10-table billing schema, 180,000 rows generated and verified in **5.04 s**.
+- 300 tables × 1,000 rows (300k rows, 2,399 invariants): **6.9 s**, 79 MB.
+- 1,200 tables × 1,000 rows (1.2M rows, 9,599 invariants): **28 s**, 173 MB.
+- 5,000-table reverse-ordered FK chain: plan succeeds with the iterative SCC.
 - Repair: 50 invoices repaired in one pass, residual 0, PASS.
 - Distribution: source skew 80/20 reproduced at **81/19** in the target, PASS.
-- **55 tests passing** (unit, integration and architecture guards).
+- **59 tests passing** (unit, integration and architecture guards).
 - Same seed produces the same dataset hash every run.
 
 ## Documentation
@@ -102,10 +107,15 @@ cli ──► application ──► core (domain + ports)
 
 ## Known gaps
 
+- Partitioned tables are not routed: partitions are introspected as separate
+  tables, so generation duplicates rows and fails with a duplicate key.
 - Trigger side effects are inventoried but not replayed.
+- Stored procedures are not analyzed; only trigger functions are inventoried.
 - Exclusion constraints are not generated against.
 - Distributions are per column; correlations are not modelled.
 - Date histograms are not used.
+- No schema include/exclude filter: all non-system schemas are introspected.
+- Verification is sequential (one query per invariant).
 - Cross-table rules need an explicit `repair:` declaration.
 - SQL Server, MySQL and static code analysis are roadmap items.
 
@@ -113,11 +123,11 @@ See [`docs/limitations.md`](docs/limitations.md).
 
 ## Next tasks
 
-1. `TABLESAMPLE` and date histograms for profiles.
-2. Column correlations (country ↔ city, price ↔ category).
-3. Partitioned table routing.
-4. Publish to PyPI and the GitHub Marketplace.
-5. First design-partner pilot with the "two weeks or you do not pay" offer.
+1. Partitioned table routing.
+2. `TABLESAMPLE` and date histograms for profiles.
+3. Column correlations (country ↔ city, price ↔ category).
+4. Schema include/exclude filters and function-body deduplication by OID.
+5. Publish to PyPI and the GitHub Marketplace; first design-partner pilot.
 
 ## Decision rules
 

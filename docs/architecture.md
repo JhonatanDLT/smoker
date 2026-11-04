@@ -125,7 +125,13 @@ yet, which makes foreign-key cycles work without recursion.
 ### Topological order
 
 `graph.py` builds child → parent edges and condenses strongly connected
-components with Tarjan. Parents come first; cycles are collapsed and reported.
+components with an **iterative** Tarjan pass. Parents come first; cycles are
+collapsed and reported. The iterative implementation exists because a
+reverse-ordered chain of 1,200 tables is enough to hit Python's recursion limit;
+a 5,000-table chain is covered by a test.
+
+The target is truncated in batches of 100 tables, so a schema with thousands of
+tables does not exhaust `max_locks_per_transaction`.
 
 ### Row construction
 
@@ -235,6 +241,15 @@ A certificate that hides its gaps is worse than no certificate.
 
 ## Capacity
 
+Measured on a local PostgreSQL 16 (a 4-vCPU VPS will be slower on CPU-bound
+steps, but memory is not the constraint):
+
+| Schema | Rows | Invariants | Time | Peak RSS |
+|---|---:|---:|---:|---:|
+| 300 tables × 1,000 | 300k | 2,399 | 6.9 s | 79 MB |
+| 1,200 tables × 1,000 | 1.2M | 9,599 | 28 s | 173 MB |
+
 `COPY` handles 50–150k rows/s on simple tables; Python generation is the
-bottleneck. On a 4-vCPU / 24 GB VPS, 180k rows across ten tables take about five
-seconds. Memory is bounded by key pools, not by row data, which is streamed.
+bottleneck. Memory is bounded by key pools, not by row data, which is streamed.
+Reports for 1.2M rows and 9,599 invariants weigh 3.7 MB (JSON) and 1.6 MB
+(HTML).
