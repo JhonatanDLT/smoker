@@ -1,0 +1,18 @@
+invariants:
+  - id: events_amount_non_negative
+    table: part.events
+    description: event amounts are never negative
+    sql: |
+      SELECT id FROM part.events WHERE amount < 0
+
+  - id: audit_payload_is_object
+    table: part.audit
+    description: audit payloads are JSON objects
+    sql: |
+      SELECT id FROM part.audit WHERE jsonb_typeof(payload) <> 'object'
+
+  - id: audit_kind_is_known
+    table: part.audit
+    description: audit kind is one of the partitioned values
+    sql: |
+      SELECT id FROM part.audit WHERE kind NOT IN ('login', 'purchase')

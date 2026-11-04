@@ -67,12 +67,32 @@ def build_plan(
             + "; primary keys are pre-allocated so the cycle can still be generated"
         )
     for key, plan in tables.items():
-        if plan.rows and not catalog.table(key).primary_key:
-            unique_keys = [u for u in catalog.table(key).uniques]
+        table = catalog.table(key)
+        if plan.rows and not table.primary_key:
+            unique_keys = [u for u in table.uniques]
             if not unique_keys:
                 warnings.append(
                     f"{key} has no primary key or unique constraint; "
                     "rows cannot be referenced by foreign keys"
+                )
+        if table.is_partitioned:
+            if table.has_sub_partitions:
+                warnings.append(
+                    f"{key}: sub-partitioning is not supported; "
+                    "partition routing may fail"
+                )
+            if len(table.partition_key) != 1:
+                warnings.append(
+                    f"{key}: multi-column partition keys are not supported; "
+                    "values may fall outside the partitions"
+                )
+            if not any(
+                partition.strategy in {"range", "list"}
+                for partition in table.partitions
+            ):
+                warnings.append(
+                    f"{key}: no range or list partitions found; "
+                    "the partition key is generated without bounds"
                 )
 
     return Plan(

@@ -4,7 +4,34 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
-## v0.2.1 — Scale fixes (2026-11-04)
+## [0.3.0] — 2026-11-04
+
+### Added
+
+- **Partitioned table routing.** Introspection reads `pg_partitioned_table` and
+  `pg_get_expr(relpartbound)`, excludes child partitions from the table list,
+  and attaches them as metadata to the parent.
+- Range partitions sample inside `[lower, upper)`.
+- List partitions sample from the declared values.
+- Hash partitions let PostgreSQL route the row.
+- A partition key that is the whole primary key is generated with a counter to
+  guarantee uniqueness.
+- Fixture `examples/partitioned-events` with 12 range partitions, 2 list
+  partitions and 4 hash partitions.
+
+### Measured
+
+- 60 rows routed across 12 range partitions and 4 hash partitions in the
+  fixture.
+- Introspection reports 3 parents, not 19 relations.
+- 68 tests passing.
+
+### Known limits
+
+- Sub-partitioning and multi-column partition keys are not supported yet; the
+  planner emits a warning.
+
+## [0.2.1] — 2026-11-04
 
 ### Fixed
 

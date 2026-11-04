@@ -74,7 +74,7 @@ open proof/report.html
 Expected output:
 
 ```
-pgproof 0.2.1 · 10 tables · 2,000 rows · seed 42
+pgproof 0.3.0 · 10 tables · 2,000 rows · seed 42
   generate billing.accounts        200 rows
   generate billing.plans           200 rows
   ...
@@ -134,6 +134,7 @@ Three public schemas exercise different features:
 | `examples/ecommerce` | Unique `varchar` truncation, ranges, nullable ordering |
 | `examples/multi-tenant-crm` | Composite keys, scope-aware tenant foreign keys |
 | `examples/analytics` | JSONB, bounded decimals, timestamp ordering |
+| `examples/partitioned-events` | Range, list and hash partition routing |
 
 ```bash
 make fixtures   # creates one database per fixture and writes proof/<fixture>/

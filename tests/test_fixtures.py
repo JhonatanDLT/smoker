@@ -25,7 +25,7 @@ pytestmark = pytest.mark.integration
 
 DSN = os.environ.get("PGPROOF_TEST_DSN")
 ROOT = Path(__file__).resolve().parents[1]
-FIXTURES = ["ecommerce", "multi-tenant-crm", "analytics"]
+FIXTURES = ["ecommerce", "multi-tenant-crm", "analytics", "partitioned-events"]
 
 
 def _psql(*args: str) -> None:
@@ -45,7 +45,8 @@ def test_fixture_generates_and_verifies(fixture: str) -> None:
         "-c",
         "DROP SCHEMA IF EXISTS shop CASCADE;"
         "DROP SCHEMA IF EXISTS crm CASCADE;"
-        "DROP SCHEMA IF EXISTS analytics CASCADE;",
+        "DROP SCHEMA IF EXISTS analytics CASCADE;"
+        "DROP SCHEMA IF EXISTS part CASCADE;",
     )
     _psql("-f", str(ROOT / "examples" / fixture / "schema.sql"))
 

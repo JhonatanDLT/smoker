@@ -157,6 +157,27 @@ It then picks a parent row with the same scope, or adopts the parent's scope if
 the current one has no rows. Common columns such as `id` or `name` are
 deliberately ignored.
 
+### Partitioned tables
+
+Introspection excludes child partitions from the table list and stores them as
+metadata on the parent. `Partition` carries the bounds:
+
+- **range**: `lower` / `upper`
+- **list**: `values`
+- **hash**: `modulus` / `remainder`
+
+The generator samples the partition key inside the union of bounds:
+
+- range: pick a partition weighted by estimated rows, then sample in
+  `[lower, upper)`
+- list: pick a partition, then one of its values
+- hash: no restriction; PostgreSQL routes by hash
+
+When the partition key is the whole primary key, a per-table counter guarantees
+uniqueness. Composite primary keys use the other key columns for uniqueness.
+Sub-partitioning and multi-column partition keys are reported as warnings and
+generated without bounds.
+
 ### Determinism
 
 Each table has its own `random.Random` seeded with `f"{seed}:{table}"`. Retries

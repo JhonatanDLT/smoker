@@ -17,7 +17,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 
-from .distribution import build_distribution, coerce_value
+from .distribution import build_distribution, coerce_value, numeric_scale
 from .invariants import LocalRules, infer_semantic, parse_local_rules
 from .ir import Catalog, Column, DataKind, Table
 from .planner import Plan
@@ -102,6 +102,7 @@ class Generator:
                         self.distributions[(table.key, column.name)] = distribution
         self.pools: dict[tuple[str, tuple[str, ...]], list[tuple[Any, ...]]] = {}
         self._rngs: dict[str, random.Random] = {}
+        self._partition_counters: dict[str, int] = {}
         self._unique_columns: dict[str, set[str]] = {}
         self._unique_keys: dict[str, list[tuple[str, ...]]] = {}
         self._seen_keys: dict[tuple[str, tuple[str, ...]], set[tuple]] = {}
@@ -208,10 +209,24 @@ class Generator:
         values: dict[str, Any] = {}
         rng = self.rng_for(f"{table.key}:rows")
 
+        partition_values: dict[str, Any] = {}
+        if (
+            table.is_partitioned
+            and len(table.partition_key) == 1
+            and not table.has_sub_partitions
+        ):
+            partition_column = table.partition_key[0]
+            partition_value = self._partition_value(table, index, rng)
+            if partition_value is not None:
+                partition_values[partition_column] = partition_value
+                values[partition_column] = partition_value
+
         primary_key = tuple(table.primary_key)
         pk_pool = self.pools.get((table.key, primary_key)) if primary_key else None
         if pk_pool is not None and index < len(pk_pool):
             for name, value in zip(primary_key, pk_pool[index]):
+                if name in partition_values:
+                    continue
                 values[name] = value
 
         nullable = {column.name: column.nullable for column in table.columns}
@@ -322,6 +337,172 @@ class Generator:
             )
             index_key = (table.key, key_columns, scope_columns)
             self.scope_index.setdefault(index_key, []).append(entry)
+
+    def _partition_value(
+        self, table: Table, index: int, rng: random.Random
+    ) -> Any:
+        if not table.is_partitioned or len(table.partition_key) != 1:
+            return None
+        if table.has_sub_partitions:
+            return None
+        strategy = table.partition_strategy
+        if strategy not in {"r", "l"}:
+            return None
+
+        column = table.column(table.partition_key[0])
+        key_only = set(table.primary_key) == set(table.partition_key)
+
+        if strategy == "r":
+            partitions = [p for p in table.partitions if p.strategy == "range"]
+            if not partitions:
+                return None
+            if key_only:
+                return self._sequence_partition_value(table, column, partitions)
+            chosen = rng.choices(
+                partitions,
+                weights=[max(partition.estimated_rows, 1) for partition in partitions],
+                k=1,
+            )[0]
+            return self._sample_range(column, chosen.lower, chosen.upper, rng)
+
+        if strategy == "l":
+            partitions = [
+                p for p in table.partitions if p.strategy == "list" and p.values
+            ]
+            if not partitions:
+                return None
+            if key_only:
+                flat = [value for partition in partitions for value in partition.values]
+                if index >= len(flat):
+                    raise GenerationError(
+                        f"{table.key}: only {len(flat)} distinct values across list "
+                        f"partitions; cannot generate row {index + 1} with a "
+                        "partition-key-only primary key"
+                    )
+                return flat[index]
+            chosen = rng.choices(
+                partitions,
+                weights=[max(partition.estimated_rows, 1) for partition in partitions],
+                k=1,
+            )[0]
+            return rng.choice(chosen.values)
+
+        return None
+
+    def _sample_range(
+        self,
+        column: Column,
+        lower: Any,
+        upper: Any,
+        rng: random.Random,
+    ) -> Any:
+        kind = column.data_kind
+        if kind == DataKind.DATE:
+            low = (
+                lower
+                if isinstance(lower, date) and not isinstance(lower, datetime)
+                else date(2020, 1, 1)
+            )
+            high = (
+                upper
+                if isinstance(upper, date) and not isinstance(upper, datetime)
+                else date(2030, 1, 1)
+            )
+            days = (high - low).days
+            if days <= 0:
+                return low
+            return low + timedelta(days=rng.randrange(days))
+
+        if kind in (DataKind.TIMESTAMP, DataKind.TIMESTAMPTZ):
+            zone = UTC if kind == DataKind.TIMESTAMPTZ else None
+            low = lower if isinstance(lower, datetime) else datetime(2020, 1, 1, tzinfo=zone)
+            high = (
+                upper if isinstance(upper, datetime) else datetime(2030, 1, 1, tzinfo=zone)
+            )
+            seconds = int((high - low).total_seconds())
+            if seconds <= 0:
+                return low
+            return low + timedelta(seconds=rng.randrange(seconds))
+
+        if kind in (DataKind.SMALLINT, DataKind.INT, DataKind.BIGINT):
+            low = int(lower) if lower is not None else 0
+            high = int(upper) if upper is not None else low + 1_000_000
+            if high <= low:
+                return low
+            return rng.randrange(low, high)
+
+        if kind in (DataKind.NUMERIC, DataKind.FLOAT):
+            low = float(lower) if lower is not None else 0.0
+            high = float(upper) if upper is not None else low + 1_000_000.0
+            if high <= low:
+                return low
+            value = rng.uniform(low, high)
+            if kind == DataKind.NUMERIC:
+                return Decimal(str(round(value, numeric_scale(column.sql_type))))
+            return value
+
+        return None
+
+    def _sequence_partition_value(
+        self, table: Table, column: Column, partitions: list[Any]
+    ) -> Any:
+        counter = self._partition_counters.get(table.key, 0)
+        self._partition_counters[table.key] = counter + 1
+        remaining = counter
+        for partition in partitions:
+            capacity = self._range_capacity(column, partition.lower, partition.upper)
+            if remaining < capacity:
+                return self._nth_range_value(
+                    column, partition.lower, partition.upper, remaining
+                )
+            remaining -= capacity
+        raise GenerationError(
+            f"{table.key}: not enough distinct partition-key values for "
+            "a partition-key-only primary key"
+        )
+
+    def _range_capacity(self, column: Column, lower: Any, upper: Any) -> int:
+        kind = column.data_kind
+        if kind == DataKind.DATE:
+            low = lower if isinstance(lower, date) else date(2020, 1, 1)
+            high = upper if isinstance(upper, date) else date(2030, 1, 1)
+            return max(0, (high - low).days)
+        if kind in (DataKind.TIMESTAMP, DataKind.TIMESTAMPTZ):
+            low = lower if isinstance(lower, datetime) else datetime(2020, 1, 1)
+            high = upper if isinstance(upper, datetime) else datetime(2030, 1, 1)
+            return max(0, int((high - low).total_seconds()))
+        if kind in (DataKind.SMALLINT, DataKind.INT, DataKind.BIGINT):
+            low = int(lower) if lower is not None else 0
+            high = int(upper) if upper is not None else low + 1_000_000
+            return max(0, high - low)
+        if kind in (DataKind.NUMERIC, DataKind.FLOAT):
+            low = float(lower) if lower is not None else 0.0
+            high = float(upper) if upper is not None else low + 1_000_000.0
+            step = 10 ** -numeric_scale(column.sql_type) if kind == DataKind.NUMERIC else 1.0
+            return max(0, int((high - low) / step))
+        return 0
+
+    def _nth_range_value(
+        self, column: Column, lower: Any, upper: Any, offset: int
+    ) -> Any:
+        kind = column.data_kind
+        if kind == DataKind.DATE:
+            low = lower if isinstance(lower, date) else date(2020, 1, 1)
+            return low + timedelta(days=offset)
+        if kind in (DataKind.TIMESTAMP, DataKind.TIMESTAMPTZ):
+            low = lower if isinstance(lower, datetime) else datetime(2020, 1, 1)
+            return low + timedelta(seconds=offset)
+        if kind in (DataKind.SMALLINT, DataKind.INT, DataKind.BIGINT):
+            low = int(lower) if lower is not None else 0
+            return low + offset
+        if kind == DataKind.NUMERIC:
+            low = Decimal(str(lower)) if lower is not None else Decimal(0)
+            step = Decimal(1).scaleb(-numeric_scale(column.sql_type))
+            return low + step * offset
+        if kind == DataKind.FLOAT:
+            low = float(lower) if lower is not None else 0.0
+            return low + offset
+        return lower
 
     def _fix_orderings(self, table: Table, values: dict[str, Any]) -> None:
         for left, right, strict in self.rules[table.key].orderings:
@@ -669,12 +850,17 @@ class Generator:
                 seen.add(signature)
                 continue
 
-            candidates = [name for name in key_columns if isinstance(values.get(name), str)]
+            candidates = [
+                name
+                for name in key_columns
+                if isinstance(values.get(name), str) and name not in table.partition_key
+            ]
             if not candidates:
                 candidates = [
                     name
                     for name in key_columns
-                    if not any(name in fk.child_columns for fk in table.foreign_keys)
+                    if name not in table.partition_key
+                    and not any(name in fk.child_columns for fk in table.foreign_keys)
                 ]
             if not candidates:
                 continue

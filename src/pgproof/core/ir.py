@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field, fields, is_dataclass
+from datetime import UTC, date, datetime, time
+from decimal import Decimal
 from enum import Enum
 from typing import Any
 
@@ -151,6 +153,19 @@ class Trigger:
 
 
 @dataclass
+class Partition:
+    schema: str
+    name: str
+    strategy: str  # range | list | hash | default
+    lower: Any = None
+    upper: Any = None
+    values: list[Any] = field(default_factory=list)
+    modulus: int | None = None
+    remainder: int | None = None
+    estimated_rows: int = 0
+
+
+@dataclass
 class Table:
     schema: str
     name: str
@@ -161,6 +176,12 @@ class Table:
     checks: list[CheckConstraint] = field(default_factory=list)
     triggers: list[Trigger] = field(default_factory=list)
     estimated_rows: int | None = None
+    is_partitioned: bool = False
+    is_partition: bool = False
+    has_sub_partitions: bool = False
+    partition_strategy: str | None = None
+    partition_key: list[str] = field(default_factory=list)
+    partitions: list[Partition] = field(default_factory=list)
 
     @property
     def key(self) -> str:
@@ -206,6 +227,7 @@ class Catalog:
             uniques = [UniqueConstraint(**u) for u in raw.get("uniques", [])]
             checks = [CheckConstraint(**c) for c in raw.get("checks", [])]
             triggers = [Trigger(**t) for t in raw.get("triggers", [])]
+            partitions = [Partition(**p) for p in raw.get("partitions", [])]
             tables.append(
                 Table(
                     schema=raw["schema"],
@@ -217,8 +239,15 @@ class Catalog:
                     checks=checks,
                     triggers=triggers,
                     estimated_rows=raw.get("estimated_rows"),
+                    is_partitioned=raw.get("is_partitioned", False),
+                    is_partition=raw.get("is_partition", False),
+                    has_sub_partitions=raw.get("has_sub_partitions", False),
+                    partition_strategy=raw.get("partition_strategy"),
+                    partition_key=raw.get("partition_key", []),
+                    partitions=partitions,
                 )
             )
+            _restore_partition_values(tables[-1])
         return cls(
             database=data.get("database", ""),
             server_version=data.get("server_version", ""),
@@ -236,7 +265,54 @@ def to_plain(obj: Any) -> Any:
         return {k: to_plain(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [to_plain(v) for v in obj]
+    if isinstance(obj, (date, datetime, time)):
+        return obj.isoformat()
+    if isinstance(obj, Decimal):
+        return str(obj)
+    if isinstance(obj, (bytes, bytearray)):
+        return None
     return obj
+
+
+def _restore_scalar(value: Any, kind: DataKind) -> Any:
+    if value is None:
+        return None
+    try:
+        if kind == DataKind.DATE:
+            return date.fromisoformat(str(value).split(" ")[0])
+        if kind in (DataKind.TIMESTAMP, DataKind.TIMESTAMPTZ):
+            parsed = datetime.fromisoformat(str(value).replace(" ", "T"))
+            if kind == DataKind.TIMESTAMPTZ and parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed
+        if kind in (DataKind.SMALLINT, DataKind.INT, DataKind.BIGINT):
+            return int(value)
+        if kind == DataKind.NUMERIC:
+            return Decimal(str(value))
+        if kind == DataKind.FLOAT:
+            return float(value)
+        if kind == DataKind.BOOLEAN:
+            return str(value).lower() in {"true", "t", "1"}
+    except (ValueError, ArithmeticError):
+        return value
+    return value
+
+
+def _restore_partition_values(table: Table) -> None:
+    if len(table.partition_key) != 1:
+        return
+    try:
+        column = table.column(table.partition_key[0])
+    except KeyError:
+        return
+    for partition in table.partitions:
+        if partition.strategy == "range":
+            partition.lower = _restore_scalar(partition.lower, column.data_kind)
+            partition.upper = _restore_scalar(partition.upper, column.data_kind)
+        elif partition.strategy == "list":
+            partition.values = [
+                _restore_scalar(value, column.data_kind) for value in partition.values
+            ]
 
 
 def quote_ident(name: str) -> str:

@@ -7,7 +7,7 @@ cd "$ROOT"
 
 ROWS="${ROWS:-100}"
 
-for fixture in ecommerce multi-tenant-crm analytics; do
+for fixture in ecommerce multi-tenant-crm analytics partitioned-events; do
   db="pgproof_${fixture//-/_}"
   echo "=== $fixture ($db) ==="
   dropdb --if-exists "$db" >/dev/null 2>&1 || true

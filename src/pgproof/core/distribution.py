@@ -114,7 +114,7 @@ def coerce_value(column: Column, value: Any) -> Any:
             decimal_value = value if isinstance(value, Decimal) else _decimal(value)
             if not isinstance(decimal_value, Decimal):
                 return value
-            scale = _numeric_scale(column.sql_type)
+            scale = numeric_scale(column.sql_type)
             return decimal_value.quantize(Decimal(1).scaleb(-scale))
         if kind == DataKind.FLOAT:
             return float(value)
@@ -132,7 +132,7 @@ def _decimal(value: Any) -> Any:
         return value
 
 
-def _numeric_scale(sql_type: str) -> int:
+def numeric_scale(sql_type: str) -> int:
     match = _NUMERIC_SCALE.search(sql_type)
     if match:
         return int(match.group(1))

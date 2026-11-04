@@ -6,6 +6,9 @@ knows, so we never parse DDL when a live connection is available.
 
 from __future__ import annotations
 
+import re
+from datetime import UTC, date, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import psycopg
@@ -14,7 +17,9 @@ from ...core.ir import (
     Catalog,
     CheckConstraint,
     Column,
+    DataKind,
     ForeignKey,
+    Partition,
     Table,
     Trigger,
     UniqueConstraint,
@@ -27,7 +32,8 @@ _TABLES_SQL = """
 SELECT n.nspname AS schema,
        c.relname AS name,
        c.relkind::text AS relkind,
-       c.reltuples::bigint AS estimated_rows
+       c.reltuples::bigint AS estimated_rows,
+       c.relispartition AS is_partition
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE c.relkind IN ('r', 'p')
@@ -109,6 +115,40 @@ WHERE NOT t.tgisinternal
 ORDER BY n.nspname, c.relname, t.tgname
 """
 
+_PARTITIONED_SQL = """
+SELECT parent_ns.nspname AS schema,
+       parent.relname AS table_name,
+       pt.partstrat::text AS strategy,
+       (
+         SELECT array_agg(a.attname ORDER BY u.ord)
+         FROM unnest(pt.partattrs) WITH ORDINALITY AS u(attnum, ord)
+         JOIN pg_attribute a
+           ON a.attrelid = pt.partrelid AND a.attnum = u.attnum
+       ) AS key_columns
+FROM pg_partitioned_table pt
+JOIN pg_class parent ON parent.oid = pt.partrelid
+JOIN pg_namespace parent_ns ON parent_ns.oid = parent.relnamespace
+WHERE parent_ns.nspname NOT IN ('pg_catalog', 'information_schema')
+"""
+
+_PARTITIONS_SQL = """
+SELECT parent_ns.nspname AS parent_schema,
+       parent.relname AS parent_table,
+       child_ns.nspname AS child_schema,
+       child.relname AS child_table,
+       child.relkind::text AS child_kind,
+       child.reltuples::bigint AS estimated_rows,
+       pg_get_expr(child.relpartbound, child.oid) AS bound
+FROM pg_inherits i
+JOIN pg_class parent ON parent.oid = i.inhparent
+JOIN pg_namespace parent_ns ON parent_ns.oid = parent.relnamespace
+JOIN pg_class child ON child.oid = i.inhrelid
+JOIN pg_namespace child_ns ON child_ns.oid = child.relnamespace
+WHERE parent.relkind = 'p'
+  AND parent_ns.nspname NOT IN ('pg_catalog', 'information_schema')
+ORDER BY parent_ns.nspname, parent.relname, child.relname
+"""
+
 
 def connect(dsn: str) -> psycopg.Connection:
     return psycopg.connect(dsn, autocommit=True)
@@ -127,7 +167,9 @@ def introspect(conn: psycopg.Connection) -> Catalog:
     tables: dict[str, Table] = {}
     with conn.cursor() as cur:
         cur.execute(_TABLES_SQL)
-        for schema, name, _relkind, estimated_rows in cur.fetchall():
+        for schema, name, _relkind, estimated_rows, is_partition in cur.fetchall():
+            if is_partition:
+                continue
             tables[f"{schema}.{name}"] = Table(
                 schema=schema, name=name, estimated_rows=int(estimated_rows or 0)
             )
@@ -266,6 +308,8 @@ def introspect(conn: psycopg.Connection) -> Catalog:
                 )
             )
 
+    _attach_partitions(conn, tables)
+
     return Catalog(
         database=database,
         server_version=version,
@@ -295,6 +339,158 @@ def _trigger_events(tgtype: int) -> str:
     if tgtype & 32:
         events.append("TRUNCATE")
     return " OR ".join(events) or "UNKNOWN"
+
+
+def _attach_partitions(conn: psycopg.Connection, tables: dict[str, Table]) -> None:
+    metadata: dict[str, tuple[str, list[str]]] = {}
+    with conn.cursor() as cur:
+        cur.execute(_PARTITIONED_SQL)
+        for schema, name, strategy, key_columns in cur.fetchall():
+            metadata[f"{schema}.{name}"] = (strategy, list(key_columns or []))
+
+    for key, (strategy, key_columns) in metadata.items():
+        table = tables.get(key)
+        if table is None:
+            continue
+        table.is_partitioned = True
+        table.partition_strategy = strategy
+        table.partition_key = key_columns
+
+    if not metadata:
+        return
+
+    with conn.cursor() as cur:
+        cur.execute(_PARTITIONS_SQL)
+        for row in cur.fetchall():
+            (
+                parent_schema,
+                parent_table,
+                child_schema,
+                child_table,
+                child_kind,
+                estimated_rows,
+                bound,
+            ) = row
+            table = tables.get(f"{parent_schema}.{parent_table}")
+            if table is None:
+                continue
+            column = (
+                table.column(table.partition_key[0])
+                if len(table.partition_key) == 1
+                else None
+            )
+            partition = parse_partition_bound(bound or "", column)
+            if partition is None:
+                continue
+            partition.schema = child_schema
+            partition.name = child_table
+            partition.estimated_rows = max(0, int(estimated_rows or 0))
+            table.partitions.append(partition)
+            if child_kind == "p":
+                table.has_sub_partitions = True
+
+
+_RANGE_BOUND = re.compile(r"FOR VALUES FROM \((.*?)\) TO \((.*?)\)$", re.DOTALL)
+_LIST_BOUND = re.compile(r"FOR VALUES IN \((.*)\)$", re.DOTALL)
+_HASH_BOUND = re.compile(
+    r"FOR VALUES WITH \(MODULUS (\d+), REMAINDER (\d+)\)", re.IGNORECASE
+)
+_CAST = re.compile(r"^(.*?)::[\w\s\[\]\.\"']+$", re.DOTALL)
+
+
+def parse_partition_bound(bound: str, column: Column | None) -> Partition | None:
+    text = " ".join(bound.split())
+    if not text:
+        return None
+    if text.upper() == "DEFAULT":
+        return Partition(schema="", name="", strategy="default")
+
+    match = _RANGE_BOUND.search(text)
+    if match:
+        return Partition(
+            schema="",
+            name="",
+            strategy="range",
+            lower=_parse_literal(match.group(1), column),
+            upper=_parse_literal(match.group(2), column),
+        )
+
+    match = _LIST_BOUND.search(text)
+    if match:
+        values = [
+            _parse_literal(part, column)
+            for part in _split_top_level(match.group(1))
+        ]
+        return Partition(schema="", name="", strategy="list", values=values)
+
+    match = _HASH_BOUND.search(text)
+    if match:
+        return Partition(
+            schema="",
+            name="",
+            strategy="hash",
+            modulus=int(match.group(1)),
+            remainder=int(match.group(2)),
+        )
+    return None
+
+
+def _split_top_level(text: str) -> list[str]:
+    parts: list[str] = []
+    current: list[str] = []
+    depth = 0
+    in_quote = False
+    for char in text:
+        if char == "'":
+            in_quote = not in_quote
+            current.append(char)
+        elif not in_quote and char == "(":
+            depth += 1
+            current.append(char)
+        elif not in_quote and char == ")":
+            depth -= 1
+            current.append(char)
+        elif not in_quote and depth == 0 and char == ",":
+            parts.append("".join(current).strip())
+            current = []
+        else:
+            current.append(char)
+    if current:
+        parts.append("".join(current).strip())
+    return [part for part in parts if part]
+
+
+def _parse_literal(text: str, column: Column | None) -> Any:
+    value = text.strip()
+    if value.upper() in {"MINVALUE", "MAXVALUE"}:
+        return None
+    cast = _CAST.match(value)
+    if cast:
+        value = cast.group(1).strip()
+    if value.startswith("'") and value.endswith("'"):
+        value = value[1:-1].replace("''", "'")
+    if column is None:
+        return value
+    kind = column.data_kind
+    try:
+        if kind == DataKind.DATE:
+            return date.fromisoformat(value.split(" ")[0])
+        if kind in (DataKind.TIMESTAMP, DataKind.TIMESTAMPTZ):
+            parsed = datetime.fromisoformat(value.replace(" ", "T"))
+            if kind == DataKind.TIMESTAMPTZ and parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed
+        if kind in (DataKind.SMALLINT, DataKind.INT, DataKind.BIGINT):
+            return int(value)
+        if kind == DataKind.NUMERIC:
+            return Decimal(value)
+        if kind == DataKind.FLOAT:
+            return float(value)
+        if kind == DataKind.BOOLEAN:
+            return value.lower() in {"true", "t", "1"}
+    except (ValueError, InvalidOperation):
+        return value
+    return value
 
 
 def table_counts(conn: psycopg.Connection, table_keys: list[str]) -> dict[str, int]:

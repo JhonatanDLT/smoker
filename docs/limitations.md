@@ -8,6 +8,10 @@ This page exists because trust is built by publishing what you do **not** do.
   primary keys, foreign keys, enum domains, and the `CHECK` constraints that the
   local rule parser understands.
 - Composite foreign keys are supported.
+- Partitioned tables are supported for single-column range, list and hash keys:
+  introspection reads the partition bounds, generation stays inside them, and
+  PostgreSQL routes each row. Sub-partitioning and multi-column keys are not
+  supported yet.
 - Deep foreign-key chains are supported: the SCC pass is iterative, so a
   5,000-table chain plans without hitting Python's recursion limit.
 - `TRUNCATE` runs in batches of 100 tables, keeping the lock footprint bounded
@@ -34,7 +38,7 @@ This page exists because trust is built by publishing what you do **not** do.
 | Row-level security policies | ignored | Generation uses a privileged connection. |
 | Domain constraints | partially | The base type is generated; domain `CHECK`s are enforced by PostgreSQL at load time. |
 | `NOT VALID` constraints | verified, flagged | They are enforced on new rows, so we check them and warn that old rows were never validated. |
-| Partitioned tables | **not supported** | Partitions are introspected as separate tables, so generation duplicates rows and fails with a duplicate key. Partition routing is the next correctness gap. |
+| Partitioned tables | **supported** | Single-column range, list and hash keys. Partitions are introspected as metadata, not as separate tables. Sub-partitioning and multi-column keys are not supported. |
 | Generated columns | excluded from writes | The database computes them. |
 | Arrays | empty array | Element type and length are not modelled. |
 | `bytea` | placeholder | Values are not meaningful. |
