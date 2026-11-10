@@ -118,6 +118,7 @@ class ForeignKey:
     parent_table: str
     parent_columns: list[str]
     on_delete: str | None = None
+    inferred: bool = False
 
     @property
     def parent_key(self) -> str:

@@ -266,6 +266,29 @@ command, and both schema and dataset hashes.
 
 A certificate that hides its gaps is worse than no certificate.
 
+## Dump loading
+
+`adapters/postgres/dump.py` builds the same `Catalog` from a `.sql` file:
+
+- `split_statements` handles dollar quotes, `COPY ... FROM stdin` blocks,
+  psql meta-commands and comments.
+- `sqlglot` parses `CREATE TABLE`, `ALTER TABLE`, `CREATE TYPE`, `CREATE INDEX`
+  and `CREATE VIEW`.
+- Regular expressions handle `CREATE FUNCTION`, `CREATE PROCEDURE`,
+  `CREATE TRIGGER` and `CREATE DOMAIN`, whose procedural bodies are not part of
+  the DDL grammar.
+- A post-processing pass builds the partition tree and infers relationships.
+
+Relationships come from declared foreign keys. Missing ones are inferred from
+`*_id` naming and from `JOIN` conditions in views; inferred keys carry
+`ForeignKey.inferred = True`.
+
+Functions are stored once in `Catalog.functions`; triggers reference them by
+name. In a dump there are no OIDs, so the loader assigns synthetic ones.
+
+`--schema-file` makes the source DSN optional for `generate` and `run`, and
+supplies the catalog for `verify`, `plan` and `audit`.
+
 ## Security
 
 - Credentials come from the environment or `--dsn`, never from the report.

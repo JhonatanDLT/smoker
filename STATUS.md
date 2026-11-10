@@ -1,9 +1,10 @@
 # Status
 
-**Date:** 2026-11-02
-**Version:** 0.3.2
-**State:** working v1 plus CI output, repair loop and distribution-aware
-generation. Tested end to end against PostgreSQL 16.
+**Date:** 2026-11-10
+**Version:** 0.4.0
+**State:** working v1 plus CI output, repair loop, distribution-aware
+generation, partitioned tables and offline schema dumps. Tested end to end
+against PostgreSQL 16.
 
 ---
 
@@ -12,6 +13,9 @@ generation. Tested end to end against PostgreSQL 16.
 | Capability | State |
 |---|---|
 | Catalog introspection (`pg_class`, `pg_constraint`, `pg_trigger`, `pg_proc`) | ✅ |
+| **Offline schema dump loader** (`pgproof load-dump`, `--schema-file`) | ✅ |
+| Functions, triggers, views and partitions from a dump | ✅ |
+| **Inferred foreign keys** from `*_id` naming and view JOINs | ✅ |
 | Invariants from NOT NULL, UNIQUE, PK, FK, CHECK, enums | ✅ |
 | Application rules from YAML spec | ✅ |
 | Deterministic generation (seed per table) | ✅ |
@@ -37,7 +41,7 @@ generation. Tested end to end against PostgreSQL 16.
 | **Distribution profiling** (`pgproof profile`) and profile-aware generation | ✅ |
 | **TABLESAMPLE** sampling and date/timestamp histograms | ✅ |
 | Dataset SHA-256 (recomputed after repairs) | ✅ |
-| CLI: `introspect`, `profile`, `plan`, `generate`, `verify`, `run` | ✅ |
+| CLI: `introspect`, `load-dump`, `profile`, `plan`, `generate`, `verify`, `run` | ✅ |
 | Clean architecture: ports, use cases, adapters | ✅ |
 | Architecture guards in the test suite | ✅ |
 | Ruff clean | ✅ |
@@ -68,7 +72,10 @@ generation. Tested end to end against PostgreSQL 16.
   passed.
 - Repair: 50 invoices repaired in one pass, residual 0, PASS.
 - Distribution: source skew 80/20 reproduced at **81/19** in the target, PASS.
-- **82 tests passing** (unit, integration and architecture guards).
+- **Dump-only generation:** 10-table billing schema loaded from `.sql`, 500
+  rows generated, 93 invariants PASS; the partitioned dump generated 300 rows
+  and 29 invariants PASS.
+- **91 tests passing** (unit, integration and architecture guards).
 - Same seed produces the same dataset hash every run.
 
 ## Documentation
@@ -121,8 +128,12 @@ cli ──► application ──► core (domain + ports)
 
 ## Known gaps
 
+- Dump loading: PL/pgSQL bodies are stored but not parsed; `CREATE RULE`,
+  event triggers, policies, `LIKE`, `INHERITS` and `ATTACH PARTITION` are not
+  applied.
+- Inferred foreign keys are heuristic; check the `inferred` flag.
 - Trigger side effects are inventoried but not replayed.
-- Stored procedures, `CREATE RULE` and event triggers are not analyzed.
+- Stored procedures and rules are not analyzed.
 - Exclusion constraints are not generated against.
 - Distributions are per column; correlations are not modelled.
 - No parallel verification yet.
@@ -133,11 +144,12 @@ See [`docs/limitations.md`](docs/limitations.md).
 
 ## Next tasks
 
-1. Column correlations (country ↔ city, price ↔ category).
-2. Parallel verification.
-3. Function and rule analysis (static code analysis, phase 3).
-4. Publish to PyPI and the GitHub Marketplace.
-5. First design-partner pilot.
+1. Harden the dump loader: `LIKE`, `INHERITS`, `ATTACH PARTITION`, rules and
+   policies.
+2. Extract simple trigger/function rules (`RAISE EXCEPTION`, `NEW.col :=`).
+3. Column correlations and parallel verification.
+4. SQL Server adapter.
+5. Publish to PyPI and the GitHub Marketplace; first design-partner pilot.
 
 ## Decision rules
 

@@ -100,6 +100,19 @@ A report contains:
 It does not contain source rows, DSNs or credentials. Still, schema names can be
 confidential: treat `report.json`, `catalog.json` and `plan.json` as internal.
 
+### Do I need a live database?
+
+No for schema understanding: `pgproof load-dump db/schema.sql` builds the
+catalog from a `.sql` dump. Yes for generation and verification: you still need
+a target PostgreSQL database to load the rows and run the checks.
+
+## Dump security
+
+A schema dump contains table and column names, constraints, function bodies and
+possibly credentials in `COPY` comments. Treat it as confidential. The loader
+skips `COPY` data, but the file itself should still be handled as internal
+material.
+
 ## Incident checklist
 
 - [ ] Rotate credentials.

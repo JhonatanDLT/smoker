@@ -37,7 +37,7 @@ export PGPROOF_TARGET_DSN=postgresql:///pgproof_demo
 Expected output:
 
 ```
-pgproof 0.3.2 · 10 tables · 2,000 rows · seed 42
+pgproof 0.4.0 · 10 tables · 2,000 rows · seed 42
   generate billing.accounts        200 rows
   ...
 RESULT PASS · 92 passed · 0 failed · 0 errors · 1 skipped · 0 violations
@@ -58,6 +58,25 @@ Open `proof/report.html`.
 
 The skipped item is the trigger: pgproof inventories triggers but does not replay
 their side effects. That limitation is printed in the report.
+
+## From a .sql dump (no live source)
+
+If you only have a schema dump, pgproof can build the catalog without a
+database connection:
+
+```bash
+pgproof load-dump db/schema.sql -o catalog.json
+pgproof run \
+  --schema-file db/schema.sql \
+  --target-env PGPROOF_TARGET_DSN \
+  --rows 5000 \
+  --out proof
+```
+
+The loader extracts tables, columns, constraints, enums, domains, partitions,
+functions, triggers and views. Relationships come from declared foreign keys;
+when a dump omits them, pgproof infers them from `*_id` naming and from `JOIN`s
+in views, marking them as `inferred`.
 
 ## Next steps
 

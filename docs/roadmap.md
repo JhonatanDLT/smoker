@@ -39,7 +39,15 @@ The order is deliberate: each phase is funded by the previous one.
   *(partial)*
 - `pgproof explain <invariant>`: why a rule exists and where it came from.
 
-## v0.4 — SQL Server (months 4–6)
+## v0.4 — Offline dump (delivered in 0.4.0)
+
+- `pgproof load-dump` for `.sql` files.
+- Tables, columns, constraints, enums, domains, partitions, functions,
+  triggers, views and simple unique indexes.
+- Inferred foreign keys from naming and view JOINs.
+- `--schema-file` for `plan`, `audit`, `generate`, `verify` and `run`.
+
+## v0.5 — SQL Server (months 4–6)
 
 Only if two paying customers request it in writing.
 
@@ -49,7 +57,7 @@ Only if two paying customers request it in writing.
 - SQL Server as a **target** for generation.
 - Same invariant model, same report.
 
-## v0.5 — Other dialects (months 7–9)
+## v0.6 — Other dialects (months 7–9)
 
 - MySQL / MariaDB.
 - Oracle only with an enterprise contract that funds the work.

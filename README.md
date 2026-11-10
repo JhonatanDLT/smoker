@@ -74,7 +74,7 @@ open proof/report.html
 Expected output:
 
 ```
-pgproof 0.3.2 · 10 tables · 2,000 rows · seed 42
+pgproof 0.4.0 · 10 tables · 2,000 rows · seed 42
   generate billing.accounts        200 rows
   generate billing.plans           200 rows
   ...
@@ -88,6 +88,7 @@ RESULT PASS · 63 passed · 0 failed · 0 errors · 2 skipped · 0 violations
 | Command | What it does |
 |---|---|
 | `pgproof introspect` | Save the catalog as JSON |
+| `pgproof load-dump` | Build the catalog from a `.sql` dump |
 | `pgproof audit` | Produce a Markdown schema readiness audit |
 | `pgproof profile` | Sample the source and save a distribution profile |
 | `pgproof plan` | Build a generation plan without touching data |
@@ -99,6 +100,7 @@ Common options:
 
 ```
 --source, --target     DSN or the name of an environment variable
+--schema-file          build the catalog from a .sql dump
 --rows                 default rows per table (default: 1000)
 --table-rows           per-table overrides, e.g. users=5000,plans=5
 --seed                 deterministic seed (default: 42)
@@ -170,6 +172,20 @@ pgproof audit --dsn-env PGPROOF_SOURCE_DSN --out audit.md
 It lists the inventory, the invariants pgproof would verify, and risks by
 severity: missing primary keys, orphan-prone tables, triggers, unparsed checks
 and `NOT VALID` constraints. It reads metadata only.
+
+## From a .sql dump
+
+No live source is required. The dump loader extracts tables, columns,
+constraints, enums, domains, partitions, functions, triggers and views.
+
+```bash
+pgproof load-dump db/schema.sql -o catalog.json
+pgproof run --schema-file db/schema.sql --target-env PGPROOF_TARGET_DSN --out proof
+```
+
+Relationships come from declared foreign keys. When a dump omits them, pgproof
+infers them from `*_id` naming and from `JOIN`s in views, and marks them as
+`inferred`.
 
 ## Repairs
 

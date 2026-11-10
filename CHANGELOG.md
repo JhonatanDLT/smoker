@@ -4,6 +4,33 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [0.4.0] — 2026-11-10
+
+### Added
+
+- **Offline schema dump loader.** `pgproof load-dump db/schema.sql` builds the
+  catalog from a `.sql` file: tables, columns, constraints, enums, domains,
+  partitions, functions, triggers, views and simple unique indexes.
+- **`--schema-file`** on `plan`, `audit`, `generate`, `verify` and `run`. The
+  source DSN becomes optional for generation; the target DSN is still required.
+- **Inferred foreign keys** from `*_id` naming and from `JOIN` conditions in
+  views. Inferred keys carry `ForeignKey.inferred = True`.
+- `sqlglot` as a dependency for PostgreSQL DDL parsing.
+
+### Measured
+
+- Dump-only billing: 10 tables, 500 rows, 93 invariants PASS.
+- Dump-only partitioned schema: 300 rows, 29 invariants PASS.
+- 91 tests passing.
+
+### Known limits
+
+- PL/pgSQL bodies are stored but not parsed; triggers are inventoried, not
+  replayed.
+- `CREATE RULE`, event triggers, policies, `LIKE`, `INHERITS` and
+  `ATTACH PARTITION` are not applied.
+- Inferred foreign keys are heuristic.
+
 ## [0.3.2] — 2026-11-10
 
 ### Added

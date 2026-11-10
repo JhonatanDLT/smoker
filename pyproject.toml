@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pgproof"
-version = "0.3.2"
+version = "0.4.0"
 description = "Synthetic Postgres data that ships with proof."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,6 +12,7 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "pgproof" }]
 dependencies = [
   "psycopg[binary]>=3.1",
+  "sqlglot>=25",
   "typer>=0.12",
   "PyYAML>=6.0",
 ]

@@ -77,6 +77,22 @@ The catalog is a reusable input for `plan` and `verify` via `--catalog`.
 
 ---
 
+## `pgproof load-dump`
+
+Builds the catalog from a schema dump (`.sql`) without a database connection.
+
+| Option | Default | Description |
+|---|---|---|
+| `FILE` | — | Path to the `.sql` dump |
+| `--out`, `-o` | `catalog.json` | Output file |
+| `--schema` | — | Comma-separated schemas |
+| `--include` | — | Comma-separated globs |
+| `--exclude` | — | Comma-separated globs |
+
+```bash
+pgproof load-dump db/schema.sql -o catalog.json
+```
+
 ## `pgproof audit`
 
 Produces a Markdown schema readiness audit. Reads metadata only, no rows.
@@ -85,6 +101,7 @@ Produces a Markdown schema readiness audit. Reads metadata only, no rows.
 |---|---|---|
 | `--dsn` | — | DSN or env var name |
 | `--dsn-env` | `PGPROOF_SOURCE_DSN` | Env var with the DSN |
+| `--schema-file` | — | Build the catalog from a `.sql` dump instead of a live source |
 | `--out`, `-o` | `audit.md` | Output file |
 
 ```bash
@@ -155,6 +172,7 @@ Generates rows into the target database. Does not verify.
 | `--source-env` | `PGPROOF_SOURCE_DSN` | Source env var |
 | `--target` | — | Target DSN or env var name |
 | `--target-env` | `PGPROOF_TARGET_DSN` | Target env var |
+| `--schema-file` | — | Build the catalog from a `.sql` dump; the source DSN becomes optional |
 | `--rows` | `1000` | Default rows per table |
 | `--seed` | `42` | Deterministic seed |
 | `--table-rows` | — | Per-table overrides |
@@ -180,6 +198,7 @@ Verifies invariants against an existing dataset. Does not generate.
 |---|---|---|
 | `--dsn` | — | DSN or env var name |
 | `--dsn-env` | `PGPROOF_TARGET_DSN` | Env var with the DSN |
+| `--schema-file` | — | Build the catalog from a `.sql` dump; the target DSN is still required |
 | `--spec` | — | YAML with application rules |
 | `--out`, `-o` | `proof` | Output directory |
 | `--sample` | `5` | Rows shown per failure |
@@ -204,6 +223,7 @@ It accepts every option from `generate` and `verify`, plus:
 | Option | Default | Description |
 |---|---|---|
 | `--max-passes` | `3` | Repair fixed-point limit |
+| `--schema-file` | — | Build the catalog from a `.sql` dump; the source DSN becomes optional |
 | `--profile` | — | Profile JSON |
 | `--format` | `json,html,junit` | Report formats |
 | `--fail-on` | `fail` | Exit policy |

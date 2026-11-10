@@ -16,6 +16,7 @@ import psycopg
 import typer
 
 from . import __version__
+from .adapters.postgres.dump import load_dump
 from .adapters.postgres.introspect import connect, introspect
 from .adapters.postgres.profile import profile_catalog
 from .adapters.postgres.query_runner import PostgresQueryRunner
@@ -110,18 +111,24 @@ def _introspect(
 
 def _load_catalog(
     path: Path | None,
-    dsn: str,
+    dsn: str | None,
     schema: str | None = None,
     include: str | None = None,
     exclude: str | None = None,
+    schema_file: Path | None = None,
 ) -> Catalog:
     if path:
         catalog = Catalog.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
         catalog = _apply_filters(catalog, schema, include, exclude)
-    else:
-        catalog = _introspect(dsn, schema, include, exclude)
-    semantic_for_catalog(catalog)
-    return catalog
+        semantic_for_catalog(catalog)
+        return catalog
+    if schema_file:
+        catalog = _apply_filters(load_dump(schema_file), schema, include, exclude)
+        semantic_for_catalog(catalog)
+        return catalog
+    if dsn is None:
+        raise typer.BadParameter("provide --dsn, --schema-file or --catalog")
+    return _introspect(dsn, schema, include, exclude)
 
 
 def _load_profile(path: Path | None) -> Profile | None:
@@ -210,6 +217,28 @@ def introspect_cmd(
     )
 
 
+@app.command("load-dump")
+def load_dump_cmd(
+    file: Path = typer.Argument(..., exists=True, dir_okay=False),
+    out: Path = typer.Option(Path("catalog.json"), "--out", "-o"),
+    schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
+    include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
+    exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
+) -> None:
+    """Load a schema dump (.sql) and save the catalog as JSON."""
+    catalog = _apply_filters(load_dump(file), schema, include, exclude)
+    semantic_for_catalog(catalog)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        json.dumps(catalog.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    typer.echo(
+        f"{len(catalog.tables)} tables · "
+        f"{sum(len(table.columns) for table in catalog.tables)} columns · "
+        f"{len(catalog.functions)} functions → {out}"
+    )
+
+
 @app.command("plan")
 def plan_cmd(
     dsn: str | None = typer.Option(None, "--dsn"),
@@ -217,13 +246,23 @@ def plan_cmd(
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
+    schema_file: Path | None = typer.Option(
+        None, "--schema-file", help="Load the catalog from a .sql dump"
+    ),
     rows: int = typer.Option(1000, "--rows", help="Default rows per table"),
     seed: int = typer.Option(42, "--seed"),
     table_rows: str | None = typer.Option(None, "--table-rows"),
     out: Path = typer.Option(Path("plan.json"), "--out", "-o"),
 ) -> None:
     """Build and print a generation plan without touching any data."""
-    catalog = _introspect(_dsn(dsn, dsn_env), schema, include, exclude)
+    catalog = _load_catalog(
+        None,
+        _dsn(dsn, dsn_env) if schema_file is None else None,
+        schema,
+        include,
+        exclude,
+        schema_file,
+    )
     try:
         plan = build_plan(
             catalog, rows=rows, table_rows=_parse_table_rows(table_rows), seed=seed
@@ -256,10 +295,20 @@ def audit_cmd(
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
+    schema_file: Path | None = typer.Option(
+        None, "--schema-file", help="Load the catalog from a .sql dump"
+    ),
     out: Path = typer.Option(Path("audit.md"), "--out", "-o"),
 ) -> None:
     """Produce a schema readiness audit without reading any data."""
-    catalog = _introspect(_dsn(dsn, dsn_env), schema, include, exclude)
+    catalog = _load_catalog(
+        None,
+        _dsn(dsn, dsn_env) if schema_file is None else None,
+        schema,
+        include,
+        exclude,
+        schema_file,
+    )
     audit = AuditSchema(catalog).execute()
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(AuditMarkdownRenderer().render(audit), encoding="utf-8")
@@ -334,14 +383,19 @@ def generate_cmd(
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
+    schema_file: Path | None = typer.Option(
+        None, "--schema-file", help="Load the catalog from a .sql dump"
+    ),
 ) -> None:
     """Generate rows into the target database."""
-    source_dsn = _dsn(source, source_env)
+    source_dsn = _dsn(source, source_env) if schema_file is None else None
     target_dsn = _dsn(target, target_env)
-    if source_dsn == target_dsn:
+    if source_dsn is not None and source_dsn == target_dsn:
         typer.echo("warning: source and target are the same database", err=True)
 
-    catalog = _load_catalog(catalog_path, source_dsn, schema, include, exclude)
+    catalog = _load_catalog(
+        catalog_path, source_dsn, schema, include, exclude, schema_file
+    )
     connection = psycopg.connect(target_dsn)
     writer = PostgresRowWriter(connection)
     use_case = GenerateDataset(
@@ -387,12 +441,17 @@ def verify_cmd(
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
+    schema_file: Path | None = typer.Option(
+        None, "--schema-file", help="Load the catalog from a .sql dump"
+    ),
 ) -> None:
     """Verify every invariant against the target database."""
     target_dsn = _dsn(dsn, dsn_env)
     connection = psycopg.connect(target_dsn)
     try:
-        catalog = _load_catalog(catalog_path, target_dsn, schema, include, exclude)
+        catalog = _load_catalog(
+            catalog_path, target_dsn, schema, include, exclude, schema_file
+        )
         use_case = VerifyDataset(
             catalog, PostgresQueryRunner(connection), YamlSpecLoader(), seed=seed
         )
@@ -442,15 +501,20 @@ def run_cmd(
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
+    schema_file: Path | None = typer.Option(
+        None, "--schema-file", help="Load the catalog from a .sql dump"
+    ),
 ) -> None:
     """Introspect, generate, verify and write a report."""
     started = time.perf_counter()
-    source_dsn = _dsn(source, source_env)
+    source_dsn = _dsn(source, source_env) if schema_file is None else None
     target_dsn = _dsn(target, target_env)
-    if source_dsn == target_dsn:
+    if source_dsn is not None and source_dsn == target_dsn:
         typer.echo("warning: source and target are the same database", err=True)
 
-    catalog = _load_catalog(catalog_path, source_dsn, schema, include, exclude)
+    catalog = _load_catalog(
+        catalog_path, source_dsn, schema, include, exclude, schema_file
+    )
     out.mkdir(parents=True, exist_ok=True)
     (out / "catalog.json").write_text(
         json.dumps(catalog.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8"
