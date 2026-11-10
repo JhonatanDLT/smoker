@@ -4,6 +4,32 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [0.7.1] — 2026-11-10
+
+### Added
+
+- **Exclusion constraints now bound generation.** `core/exclusions.py` detects
+  conflicts against accepted rows and adjusts a non-key column deterministically:
+  equality columns advance, range columns shift, and key/FK/partition columns are
+  never touched.
+- Range types (`int4range`, `int8range`, `numrange`, `daterange`, `tsrange`,
+  `tstzrange`) are generated as `[lower, upper)` literals.
+- Live introspection reads `contype = 'x'` into `ExclusionConstraint` instead of
+  an opaque check.
+- `EXCLUDE` predicates are evaluated for simple boolean/comparison expressions;
+  unknown predicates are enforced globally.
+- Integration test loads `EXCLUDE USING btree`, `EXCLUDE USING gist` and a
+  predicate-filtered exclusion into PostgreSQL and verifies the report.
+
+### Changed
+
+- Unsupported exclusion operators fail generation loudly instead of emitting
+  rows that the database would reject.
+
+### Measured
+
+- 123 tests passing.
+
 ## [0.7.0] — 2026-11-10
 
 ### Changed

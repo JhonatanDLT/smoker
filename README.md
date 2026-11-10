@@ -74,7 +74,7 @@ open proof/report.html
 Expected output:
 
 ```
-pgproof 0.7.0 · 10 tables · 2,000 rows · seed 42
+pgproof 0.7.1 · 10 tables · 2,000 rows · seed 42
   generate billing.accounts        200 rows
   generate billing.plans           200 rows
   ...
@@ -128,7 +128,7 @@ CI.
 - `NOT NULL`, `UNIQUE`, primary keys
 - Foreign keys, including composite keys
 - `CHECK` constraints, including arithmetic and column-to-column comparisons
-- Exclusion constraints (`EXCLUDE`) parsed from a dump
+- Exclusion constraints (`EXCLUDE`) parsed, verified and generated against
 - Enum domains
 - Composite unique keys
 - Application rules declared in `--spec`
@@ -264,7 +264,8 @@ local rule engine and the database.
 ## What it does not verify (yet)
 
 - Trigger side effects. Triggers are inventoried and reported as `skipped`.
-- Exclusion constraints.
+- Exclusion constraints with operators outside `=`, `<>`, `<`, `<=`, `>`, `>=`,
+  `&&`, `@>` and `<@`; generation stops instead of guessing.
 - Cross-table business rules such as `invoice.total = SUM(lines.amount)`.
 - Statistical fidelity beyond the sampled profile.
 

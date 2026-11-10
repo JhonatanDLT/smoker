@@ -32,6 +32,7 @@ class DataKind(str, Enum):
     ENUM = "enum"
     INET = "inet"
     ARRAY = "array"
+    RANGE = "range"
     OTHER = "other"
 
 
@@ -79,6 +80,8 @@ def classify_type(sql_type: str, enum_values: list[str] | None = None) -> DataKi
         return DataKind.BYTEA
     if t in {"inet", "cidr"}:
         return DataKind.INET
+    if t in {"int4range", "int8range", "numrange", "daterange", "tsrange", "tstzrange"} or t.endswith("range"):
+        return DataKind.RANGE
     return DataKind.OTHER
 
 

@@ -18,6 +18,15 @@ from decimal import Decimal
 from typing import Any
 
 from .distribution import build_distribution, coerce_value, numeric_scale
+from .exclusions import (
+    ExclusionSpec,
+    build_exclusion_specs,
+    first_conflict,
+    next_range,
+    next_value,
+    predicate_columns,
+    range_subtype,
+)
 from .invariants import LocalRules, infer_semantic, parse_local_rules
 from .ir import Catalog, Column, DataKind, Table, all_partition_columns
 from .planner import Plan
@@ -189,6 +198,22 @@ class Generator:
                 spec = (parent_columns, shared)
                 if spec not in specs:
                     specs.append(spec)
+        self.exclusion_specs: dict[str, list[ExclusionSpec]] = {}
+        self._exclusion_columns: dict[str, list[str]] = {}
+        self._exclusion_history: dict[str, list[dict[str, Any]]] = {}
+        for table in catalog.tables:
+            specs = build_exclusion_specs(table)
+            if not specs:
+                continue
+            self.exclusion_specs[table.key] = specs
+            columns = {
+                element.column
+                for spec in specs
+                for element in spec.elements
+            }
+            for spec in specs:
+                columns |= predicate_columns(spec.predicate)
+            self._exclusion_columns[table.key] = sorted(columns)
         self._build_pools()
 
     # ------------------------------------------------------------------ rng
@@ -644,6 +669,8 @@ class Generator:
             value = time(rng.randint(0, 23), rng.randint(0, 59), rng.randint(0, 59))
         elif kind == DataKind.JSON:
             value = '{"source": "pgproof", "synthetic": true}'
+        elif kind == DataKind.RANGE:
+            value = self._range_literal(column, index)
         elif kind == DataKind.BYTEA:
             value = "\\x" + b"pgproof".hex()
         elif kind == DataKind.INET:
@@ -700,6 +727,24 @@ class Generator:
 
     def _timestamp_value(self, semantic: str | None, rng: random.Random) -> datetime:
         return _BASE_DATETIME - timedelta(seconds=rng.randint(0, 63_072_000))
+
+    def _range_literal(self, column: Column, index: int) -> str:
+        subtype = range_subtype(column.sql_type)
+        if subtype == "int":
+            lower = index * 10 + 1
+            return f"[{lower},{lower + 10})"
+        if subtype == "numeric":
+            lower = Decimal(index * 10)
+            return f"[{format(lower, 'f')},{format(lower + 10, 'f')})"
+        if subtype == "date":
+            lower = _BASE_DATE + timedelta(days=index)
+            upper = lower + timedelta(days=1)
+            return f"[{lower.isoformat()},{upper.isoformat()})"
+        if subtype == "timestamp":
+            lower = _BASE_DATETIME + timedelta(hours=index)
+            upper = lower + timedelta(hours=1)
+            return f"[{lower.isoformat(sep=' ')},{upper.isoformat(sep=' ')})"
+        return f"[{index},{index + 1})"
 
     def _text_value(
         self,
@@ -875,6 +920,18 @@ class Generator:
                     or (high_strict and numeric == Decimal(str(high)))
                 ):
                     return f"{column.name}={value} violates < {high}"
+        for left, right, strict in rules.orderings:
+            first = by_name.get(left)
+            second = by_name.get(right)
+            if first is None or second is None:
+                continue
+            try:
+                if strict and not first > second:
+                    return f"{left} must be > {right}"
+                if not strict and not first >= second:
+                    return f"{left} must be >= {right}"
+            except TypeError:
+                return f"{left} and {right} are not comparable"
         return None
 
     def generate_validated(self, table: Table, attempts: int = 50) -> Iterator[tuple[Any, ...]]:
@@ -885,8 +942,10 @@ class Generator:
             for _ in range(attempts):
                 row = self._make_row(table, columns, index)
                 row = self._enforce_unique_keys(table, row, index)
+                row = self._enforce_exclusions(table, row, index)
                 error = self.validate_row(table, row)
                 if error is None:
+                    self._record_exclusions(table, row)
                     break
                 last_error = error
             else:
@@ -896,6 +955,108 @@ class Generator:
                 )
             self._index_scope(table, row)
             yield row
+
+    def _enforce_exclusions(
+        self, table: Table, row: tuple[Any, ...], index: int
+    ) -> tuple[Any, ...]:
+        specs = self.exclusion_specs.get(table.key)
+        if not specs:
+            return row
+        unsupported = [spec.name for spec in specs if not spec.supported]
+        if unsupported:
+            raise GenerationError(
+                f"{table.key}: exclusion constraint(s) "
+                f"{', '.join(unsupported)} use operators pgproof cannot generate against"
+            )
+        columns = table.writable_columns
+        names = [column.name for column in columns]
+        values = dict(zip(names, row))
+        history = self._exclusion_history.setdefault(table.key, [])
+        for attempt in range(200):
+            conflict = first_conflict(specs, values, history)
+            if conflict is None:
+                return tuple(values[name] for name in names)
+            spec, previous = conflict
+            target = self._exclusion_target(table, spec)
+            if target is None:
+                raise GenerationError(
+                    f"{table.key} row {index + 1}: exclusion {spec.name} conflicts "
+                    "and there is no non-key column to adjust"
+                )
+            column = table.column(target)
+            if target in spec.range_columns:
+                candidate = next_range(
+                    column, values.get(target), previous.get(target)
+                )
+            else:
+                candidate = next_value(
+                    column, values.get(target), index, attempt, self.plan.seed
+                )
+            if candidate is None:
+                raise GenerationError(
+                    f"{table.key} row {index + 1}: cannot find a value for "
+                    f"{target} that satisfies exclusion {spec.name}"
+                )
+            values[target] = candidate
+        raise GenerationError(
+            f"{table.key} row {index + 1}: could not satisfy exclusion constraints "
+            "after 200 adjustments"
+        )
+
+    def _exclusion_target(self, table: Table, spec: ExclusionSpec) -> str | None:
+        fk_columns = {
+            column for fk in table.foreign_keys for column in fk.child_columns
+        }
+        unique_columns = {
+            column for unique in table.uniques for column in unique.columns
+        }
+        rules = self.rules.get(table.key)
+        rule_columns: set[str] = set()
+        if rules is not None:
+            for target, left, operator, right in rules.derived:
+                rule_columns.update((target, left))
+                if operator != "copy":
+                    rule_columns.add(right)
+            for left, right, _strict in rules.orderings:
+                rule_columns.update((left, right))
+            rule_columns.update(
+                column
+                for column, allowed in rules.allowed.items()
+                if allowed
+            )
+        blocked = (
+            fk_columns
+            | set(table.primary_key)
+            | unique_columns
+            | set(all_partition_columns(table))
+            | rule_columns
+            | predicate_columns(spec.predicate)
+        )
+        for name in spec.equality_columns:
+            column = table.column(name)
+            if name in blocked:
+                continue
+            if column.generated or column.identity:
+                continue
+            if column.data_kind == DataKind.BOOLEAN:
+                continue
+            return name
+        for name in spec.range_columns:
+            column = table.column(name)
+            if name in blocked or column.generated or column.identity:
+                continue
+            return name
+        return None
+
+    def _record_exclusions(self, table: Table, row: tuple[Any, ...]) -> None:
+        columns = self._exclusion_columns.get(table.key)
+        if not columns:
+            return
+        names = [column.name for column in table.writable_columns]
+        values = dict(zip(names, row))
+        self._exclusion_history.setdefault(table.key, []).append(
+            {name: values.get(name) for name in columns}
+        )
 
     def _enforce_unique_keys(
         self, table: Table, row: tuple[Any, ...], index: int

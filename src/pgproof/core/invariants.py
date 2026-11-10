@@ -243,6 +243,42 @@ def _q(schema: str, table: str) -> str:
     return quote_qualified(schema, table)
 
 
+def _qualify_predicate(predicate: str, table: Table, alias: str = "a") -> str:
+    """Prefix unqualified column names in an exclusion predicate with an alias."""
+    columns = {column.name for column in table.columns}
+    result: list[str] = []
+    index = 0
+    in_string = False
+    while index < len(predicate):
+        char = predicate[index]
+        if char == "'":
+            if in_string and index + 1 < len(predicate) and predicate[index + 1] == "'":
+                result.append("''")
+                index += 2
+                continue
+            in_string = not in_string
+            result.append(char)
+            index += 1
+            continue
+        if in_string:
+            result.append(char)
+            index += 1
+            continue
+        match = re.match(r"[A-Za-z_][A-Za-z0-9_]*", predicate[index:])
+        if match is not None:
+            word = match.group(0)
+            before = predicate[index - 1] if index > 0 else ""
+            if word in columns and before != ".":
+                result.append(f'{alias}.{_c(word)}')
+            else:
+                result.append(word)
+            index += len(word)
+            continue
+        result.append(char)
+        index += 1
+    return "".join(result)
+
+
 def _c(name: str) -> str:
     return quote_ident(name)
 
@@ -407,7 +443,11 @@ def invariants_from_catalog(catalog: Catalog) -> list[Invariant]:
                 f"a.{_c(element.column)} {element.operator} b.{_c(element.column)}"
                 for element in exclusion.elements
             )
-            predicate = f" AND {exclusion.predicate}" if exclusion.predicate else ""
+            predicate = (
+                f" AND {_qualify_predicate(exclusion.predicate, table)}"
+                if exclusion.predicate
+                else ""
+            )
             element_text = ", ".join(
                 f"{element.column} WITH {element.operator}"
                 for element in exclusion.elements

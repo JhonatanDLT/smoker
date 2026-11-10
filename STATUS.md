@@ -1,11 +1,11 @@
 # Status
 
 **Date:** 2026-11-10
-**Version:** 0.7.0
+**Version:** 0.7.1
 **State:** working v1 plus CI output, repair loop, distribution-aware
 generation, partitioned tables, offline schema dumps, segmentation rules, a
-dependency-safe creation order and SQL export. Tested end to end against
-PostgreSQL 16.
+dependency-safe creation order, SQL export and exclusion-aware generation.
+Tested end to end against PostgreSQL 16.
 
 ---
 
@@ -24,7 +24,7 @@ PostgreSQL 16.
 | **SQL INSERT export** (`pgproof generate --sql`) from a dump, no database | ✅ |
 | **Rules in the report** (`rules[]`, HTML table) and per-invariant provenance | ✅ |
 | **View filters** classified as aggregate candidates (never applied as checks) | ✅ |
-| **Exclusion constraints** parsed and verified as declared constraints | ✅ |
+| **Exclusion constraints** parsed, verified and generated against | ✅ |
 | **Dependency-safe creation order** (`pgproof order`) | ✅ |
 | Invariants from NOT NULL, UNIQUE, PK, FK, CHECK, enums | ✅ |
 | Application rules from YAML spec | ✅ |
@@ -98,7 +98,11 @@ PostgreSQL 16.
   sequences, tables (FK order), functions, indexes, triggers, views, rules and
   policies, with `depends_on` per step.
 - `load-dump` and `plan` now include `creation_order` in their JSON output.
-- **113 tests passing** (unit, integration and architecture guards).
+- **Exclusion constraints:** a dump with `EXCLUDE USING btree (room WITH =)`,
+  `EXCLUDE USING gist (during WITH &&)` and a combined predicate exclusion
+  generated 20 rows per table and loaded into PostgreSQL without a violation;
+  the report passed.
+- **123 tests passing** (unit, integration and architecture guards).
 - Same seed produces the same dataset hash every run.
 
 ## Documentation
@@ -162,9 +166,10 @@ cli ──► application ──► core (domain + ports)
 - View filters are report-only aggregate candidates; they never constrain the
   base table or other candidates.
 - Inferred foreign keys are heuristic; check the `inferred` flag.
-- Exclusion constraints are parsed and verified with a `ctid` self-join, but the
-  generator does not shape rows to satisfy them and partitioned tables need a
-  manual review.
+- Exclusion constraints are parsed, verified and generated against. Supported
+  operators are `=`, `<>`, `<`, `<=`, `>`, `>=`, `&&`, `@>` and `<@`; other
+  operators fail generation loudly. Partitioned tables still need manual review
+  for `ctid`-based verification.
 - SQL export emits INSERT statements; the target schema must already exist.
 - Creation-order dependencies for views come from the parsed query; dynamic SQL
   inside functions is not expanded into dependencies.

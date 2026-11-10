@@ -13,11 +13,14 @@ from typing import Any
 
 import psycopg
 
+from ...core.exclusions import parse_exclusion_definition
 from ...core.ir import (
     Catalog,
     CheckConstraint,
     Column,
     DataKind,
+    ExclusionConstraint,
+    ExclusionElement,
     ForeignKey,
     Function,
     Partition,
@@ -278,12 +281,26 @@ def introspect(conn: psycopg.Connection) -> Catalog:
                     CheckConstraint(name=name, definition=definition, validated=bool(validated))
                 )
             elif kind == "x":
-                table.checks.append(
-                    CheckConstraint(
+                method, parsed, predicate = parse_exclusion_definition(definition)
+                elements = [
+                    ExclusionElement(column=column, operator=operator)
+                    for column, operator in parsed
+                ]
+                if not elements and child_columns:
+                    operators = re.findall(
+                        r"\bWITH\s+(\S+)", definition, re.IGNORECASE
+                    )
+                    elements = [
+                        ExclusionElement(column=column, operator=operator)
+                        for column, operator in zip(child_columns, operators)
+                    ]
+                table.exclusions.append(
+                    ExclusionConstraint(
                         name=name,
+                        elements=elements,
+                        method=method,
+                        predicate=predicate,
                         definition=definition,
-                        predicate=None,
-                        validated=bool(validated),
                     )
                 )
             elif kind == "f":

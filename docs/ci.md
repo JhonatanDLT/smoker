@@ -37,7 +37,7 @@ The repository ships a composite action at the root.
 
 `version: source` installs the checkout that contains the action. That is the
 right value while pgproof is not published to PyPI. Once it is, set
-`version: 0.7.0`.
+`version: 0.7.1`.
 
 ### Outputs
 

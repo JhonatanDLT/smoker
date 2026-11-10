@@ -69,6 +69,7 @@ The order is deliberate: each phase is funded by the previous one.
 - Only table constraints define the generation space.
 - Trigger/function/view rules become segmentation candidates, report-only.
 - `pgproof generate --sql` writes INSERT statements from a dump with no database.
+- `EXCLUDE` constraints bound generation, including range overlaps (0.7.1).
 
 ## v0.8 — SQL Server (months 4–6)
 

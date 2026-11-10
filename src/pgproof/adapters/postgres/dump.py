@@ -687,19 +687,9 @@ class DumpLoader:
         if not elements:
             return
         where = params.args.get("where")
-        predicate = None
-        if where is not None:
-            predicate = (
-                where.this.copy()
-                .transform(
-                    lambda node: (
-                        exp.column(node.name, table="a")
-                        if isinstance(node, exp.Column) and not node.table
-                        else node
-                    )
-                )
-                .sql(dialect="postgres")
-            )
+        predicate = (
+            where.this.sql(dialect="postgres") if where is not None else None
+        )
         method = params.args.get("using")
         table.exclusions.append(
             ExclusionConstraint(

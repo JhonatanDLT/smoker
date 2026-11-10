@@ -533,7 +533,7 @@ def test_exclusion_constraint_is_a_declared_constraint() -> None:
         ("room", "="),
         ("during", "&&"),
     ]
-    assert exclusion.predicate == "(a.active)"
+    assert exclusion.predicate == "(active)"
     assert exclusion.provenance is not None
 
     invariant = next(
@@ -543,7 +543,7 @@ def test_exclusion_constraint_is_a_declared_constraint() -> None:
     )
     assert 'a."room" = b."room"' in invariant.violation_sql
     assert 'a."during" && b."during"' in invariant.violation_sql
-    assert "(a.active)" in invariant.violation_sql
+    assert '(a."active")' in invariant.violation_sql
     assert invariant.provenance == "CREATE TABLE booking ("
 
 

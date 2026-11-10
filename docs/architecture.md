@@ -385,16 +385,24 @@ embed the same structure.
 `EXCLUDE` constraints are declared constraints, not code-derived candidates.
 The dump loader reads `USING`, every `(column WITH operator)` element and the
 optional `WHERE` predicate from both `CREATE TABLE` and `ALTER TABLE`. The
-verifier turns them into a self-join over `ctid`:
+verifier turns them into a self-join over `ctid`.
 
-```sql
-SELECT a.ctid FROM "public"."booking" a JOIN "public"."booking" b
-ON a.ctid < b.ctid
-WHERE a."room" = b."room" AND a."during" && b."during" AND (a.active)
-```
+The generator shapes rows to avoid overlaps. `core/exclusions.py` keeps the
+projection of accepted rows for each table, evaluates the predicate, and checks
+every element pair. When a conflict appears it adjusts one non-key column
+deterministically:
 
-The generator does not yet shape rows to avoid overlaps; an exclusion violation
-is reported like any other failed invariant.
+- an equality element on a scalar column is advanced (`room = room + 1`, next
+  text suffix, next enum label, next day/second);
+- a range element (`&&`) is shifted past the previous range;
+- columns that are primary keys, single-column unique keys, foreign keys,
+  identity columns or partition keys are never adjusted.
+
+Supported elements are `=`, `<>`, `<`, `<=`, `>`, `>=`, `&&`, `@>` and `<@`.
+Range types (`int4range`, `int8range`, `numrange`, `daterange`, `tsrange`,
+`tstzrange`) are generated as `[lower, upper)` literals. If an exclusion uses an
+operator outside this set, generation fails loudly instead of producing a
+violation.
 
 View filters are a different case. A `WHERE` inside a view becomes a
 `RuleCandidate` with `kind="filter"` and `scope="aggregate"`. It describes the

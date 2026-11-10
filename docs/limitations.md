@@ -5,8 +5,8 @@ This page exists because trust is built by publishing what you do **not** do.
 ## Guaranteed in v1
 
 - Rows load into the target schema without violating `NOT NULL`, `UNIQUE`,
-  primary keys, foreign keys, enum domains, and the `CHECK` constraints that the
-  local rule parser understands.
+  primary keys, foreign keys, enum domains, `CHECK` constraints and supported
+  `EXCLUDE` constraints.
 - The generation space is defined only by declared table constraints. Triggers,
   functions, view filters and application rules are segmentation: they are
   reported, but they never add or remove allowed values.
@@ -41,7 +41,7 @@ This page exists because trust is built by publishing what you do **not** do.
 |---|---|---|
 | Trigger side effects | `skipped` | We inventory triggers but do not replay them. A trigger that inserts into an audit table will not be simulated. |
 | Stored procedures and rules | not analyzed | Only trigger functions are read, and only their body is stored. `CREATE RULE` (`pg_rewrite`) and event triggers are not scanned. |
-| Exclusion constraints (`EXCLUDE`) | verified, not generated against | Parsed from `CREATE TABLE` and `ALTER TABLE`; the verifier self-joins on `ctid`. The generator does not shape rows to avoid overlaps, and partitioned tables need manual review. |
+| Exclusion constraints (`EXCLUDE`) | verified and generated against | Parsed from `CREATE TABLE`, `ALTER TABLE` and live catalog. The generator adjusts non-key columns to avoid overlaps and supports `=`, `<>`, `<`, `<=`, `>`, `>=`, `&&`, `@>` and `<@`. Unsupported operators fail loudly. |
 | Cross-table business rules | not enforced | `invoice.total = SUM(lines.amount)` requires a repair pass that v1 does not have. Declare it in the spec and it will be verified, not fixed. |
 | `INSERT` mode with self-references | falls back to `COPY` | A row-by-row insert cannot reference a row that has not been inserted yet. |
 | Distributions | sampled, optional | `TABLESAMPLE` above 50k rows; `LIMIT` below that and on partitioned parents. Independent per column. |
@@ -132,6 +132,25 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
   JSON, arrays and timestamps rely on PostgreSQL input parsing.
 - `setval` calls are emitted for identity and `nextval` columns, but custom
   sequence defaults are not otherwise modified.
+
+## Exclusion generation limits
+
+- Supported element operators: `=`, `<>`, `<`, `<=`, `>`, `>=`, `&&`, `@>` and
+  `<@`. An exclusion with any other operator fails generation with a clear
+  error instead of emitting a violating row.
+- The generator adjusts a non-key column: primary keys, single-column unique
+  keys, foreign keys, identity columns and partition keys are never changed. If
+  every equality column is one of those, the constraint cannot be satisfied by
+  adjustment and generation fails.
+- A `WHERE` predicate is evaluated for simple boolean columns, `IS NULL`,
+  `IS TRUE/FALSE`, `AND`, `OR`, `NOT` and comparisons with literals. Unknown
+  predicates are enforced globally (stricter, never looser).
+- Range types are generated as `[lower, upper)` literals. Custom range types
+  that do not accept that format are not supported.
+- Exclusion history is kept in memory for tables that declare one; it stores
+  only the columns used by the constraint and its predicate.
+- Partitioned tables are checked per generated row, but `ctid`-based
+  verification still needs manual review across partitions.
 
 ## Distribution and repair limits
 
