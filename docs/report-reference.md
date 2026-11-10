@@ -33,7 +33,7 @@ proof/
 | `limitations` | array | What was not verified |
 | `reproduce` | string | Command that produced the report |
 | `repairs` | object | Repairs applied |
-| `rules` | array | Rules extracted from triggers and functions |
+| `rules` | array | Segmentation rules extracted from triggers, functions and views |
 
 ### `summary`
 
@@ -90,41 +90,41 @@ It is `0` when the repair converged.
 
 ### `rules`
 
-Rules extracted from trigger and function bodies. They are not declared
-constraints; they are code-derived candidates.
+Segmentation rules extracted from trigger and function bodies and from view
+filters. They are not table constraints and never change the generation space;
+the space is defined only by the declared table constraints.
 
 ```json
 [
   {
     "id": "rule:billing.invoice_lines:1",
     "kind": "derived",
+    "category": "segmentation",
     "table": "billing.invoice_lines",
     "expression": "amount = quantity * unit_price",
     "columns": ["amount", "quantity", "unit_price"],
     "confidence": 0.9,
-    "applied": true,
+    "applied": false,
     "scope": "row",
     "provenance": {
       "kind": "trigger",
       "source": "invoice_lines_amount",
       "detail": "billing.set_line_amount"
     },
-    "note": "NEW.amount := quantity * unit_price"
+    "note": "NEW.amount := quantity * unit_price (segmentation only)"
   }
 ]
 ```
 
-- `kind` is `check` (from `IF … RAISE`), `derived` (from `NEW.col := …`)
+- `kind` is `guard` (from `IF … RAISE`), `derived` (from `NEW.col := …`)
   or `filter` (from a view `WHERE`).
-- `confidence` is `0.0`–`1.0`; only `applied = true` rules are enforced as
-  checks and included in generation.
-- `scope` is `row` for trigger/function rules and `aggregate` for view
-  filters. Aggregate rules are report-only: they scope a view, never the base
-  table, and do not affect other candidates.
-- `applied = false` means the rule is reported but needs review: compound
-  conditions, unknown functions, `now()`, `random()`, self-referential
-  assignments or a view filter.
+- `category` is always `segmentation`. Table constraints are reported under
+  `invariants`, not here.
+- `applied` is always `false`: segmentation rules describe how rows are chosen
+  inside the constraint space, they never expand or shrink it.
+- `scope` is `row` for trigger/function rules and `aggregate` for view filters.
 - `provenance.kind` is `trigger`, `function` or `view`.
+- `confidence` and `note` explain how reliable the extraction is.
 
 ## Hashes
 
@@ -149,7 +149,7 @@ profile changed.
 
 The HTML report is a single self-contained file: no external fonts, no scripts.
 It contains the verdict, the summary, every invariant, failures with samples,
-repairs, extracted rules, warnings and limitations.
+repairs, segmentation rules, warnings and limitations.
 
 ## JUnit XML
 

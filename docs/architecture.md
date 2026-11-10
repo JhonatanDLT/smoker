@@ -300,31 +300,60 @@ name. In a dump there are no OIDs, so the loader assigns synthetic ones.
 `--schema-file` makes the source DSN optional for `generate` and `run`, and
 supplies the catalog for `verify`, `plan` and `audit`.
 
-## Rule extraction
+## Constraint space vs segmentation
+
+Only the declared table constraints define the generation space:
+
+- column types, enum values and domains
+- `NOT NULL`
+- primary keys and `UNIQUE`
+- foreign keys
+- `CHECK`
+- `EXCLUDE`
+
+Everything else is **segmentation**: trigger and function guards, assignments,
+view filters and application rules. Segmentation describes how to choose rows
+inside the space bounded by the table constraints; it never expands or shrinks
+that space. `RuleCandidate.applied` is `False` by design for every segmentation
+rule, and `Catalog.rules` is never merged into `table.checks`.
+
+## Segmentation extraction
 
 Trigger and function bodies are scanned after the catalog is built:
 
 - `_if_blocks` walks `IF ... THEN ... END IF`, including nested blocks, without
   being confused by `END IF` or `ELSIF`.
-- `_negate_condition` turns `IF <condition> THEN RAISE EXCEPTION` into the
-  invariant `NOT <condition>` and normalizes simple forms (`<`, `<=`, `=`,
+- `_negate_condition` turns `IF <condition> THEN RAISE EXCEPTION` into a guard
+  candidate `NOT <condition>` and normalizes simple forms (`<`, `<=`, `=`,
   `IN`, `IS NULL`, `BETWEEN`, `LIKE`).
-- `NEW.col := expression` becomes a derived rule `col = expression`.
+- `NEW.col := expression` becomes a derived candidate `col = expression`.
 - `_identifiers` separates column references from keywords, functions and type
-  names, so a rule that references an unknown identifier is not applied.
-- `_generation_supported` limits automatic enforcement to the shapes
-  `LocalRules` can generate: comparisons with literals, `IN`, `IS NOT NULL`,
-  length limits and column-to-column assignments.
+  names.
 - `_derived_confidence` grades the candidate: `0.9`–`0.95` for deterministic
   column expressions, `0.6` for unknown functions, `0.4` for `now()`/`random()`,
   `0.3` for self-referential assignments and `0.2` for dynamic SQL.
 
-Rules travel in `Catalog.rules` as `RuleCandidate` objects with `kind`,
-`table`, `expression`, `columns`, `confidence`, `applied`, `note` and
-`provenance` (`trigger` or `function`). Applied rules are also appended to
-`table.checks`, so the generator enforces them and the verifier reports them
-like declared constraints. Candidates that are not applied still appear in the
-report for review.
+Rules travel in `Catalog.rules` as `RuleCandidate` objects with `kind`
+(`guard`, `derived` or `filter`), `category="segmentation"`, `scope`
+(`row` or `aggregate`), `table`, `expression`, `columns`, `confidence`,
+`applied=False`, `note` and `provenance` (`trigger`, `function` or `view`).
+They are shown in the report for review and provenance, but they do not change
+the generation space and do not fail a verification run.
+
+## SQL export
+
+`adapters/postgres/sql_file_writer.py` implements the same `RowWriter` port as
+the connected writer:
+
+```bash
+pgproof generate --schema-file db/schema.sql --rows 1000 --sql data.sql
+```
+
+It emits `BEGIN`, optional batched `TRUNCATE`, batched `INSERT` statements and
+`COMMIT`, plus `setval` calls for identity/serial columns. It uses the same
+canonical row text as the COPY writer for hashing, so the dataset hash matches
+an equivalent connected run. `psql -f data.sql` applies the file to a schema
+created from the dump.
 
 ## Creation and insertion order
 

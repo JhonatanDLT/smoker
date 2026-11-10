@@ -31,3 +31,21 @@ def copy_text(value: Any) -> str:
         .replace("\n", "\\n")
         .replace("\r", "\\r")
     )
+
+
+def sql_literal(value: Any) -> str:
+    """Render a Python value as a PostgreSQL SQL literal for INSERT statements."""
+    if value is None:
+        return "NULL"
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, (int, float, Decimal)):
+        return str(value)
+    if isinstance(value, datetime):
+        return "'" + value.isoformat(sep=" ") + "'"
+    if isinstance(value, (date, time)):
+        return "'" + value.isoformat() + "'"
+    if isinstance(value, (bytes, bytearray)):
+        return "'\\x" + bytes(value).hex() + "'::bytea"
+    text = str(value).replace("'", "''")
+    return "'" + text + "'"

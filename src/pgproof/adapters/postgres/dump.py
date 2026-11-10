@@ -1229,23 +1229,17 @@ class DumpLoader:
             if negated is None:
                 continue
             expression, confidence, columns = negated
-            enforce = (
-                table is not None
-                and confidence >= 0.9
-                and _identifiers(expression) <= known_columns
-                and _generation_supported(expression)
-            )
             self._add_rule(
                 RuleCandidate(
                     id=f"rule:{table_key or 'function'}:{len(self.rules) + 1}",
-                    kind="check",
+                    kind="guard",
                     table=table_key or "",
                     expression=expression,
                     columns=columns,
                     confidence=confidence,
-                    applied=enforce,
+                    applied=False,
                     provenance=provenance,
-                    note=f"IF {condition} THEN RAISE",
+                    note=f"IF {condition} THEN RAISE (segmentation only)",
                 )
             )
 
@@ -1256,17 +1250,9 @@ class DumpLoader:
             identifiers = _identifiers(expression)
             confidence = _derived_confidence(expression, target, known_columns)
             self_referential = target in identifiers
-            enforce = (
-                table is not None
-                and confidence >= 0.9
-                and target in known_columns
-                and not self_referential
-                and identifiers <= known_columns
-                and _generation_supported(f"{target} = {expression}")
-            )
-            note = f"NEW.{target} := {expression}"
+            note = f"NEW.{target} := {expression} (segmentation only)"
             if self_referential:
-                note += " (self-referential; not a static invariant)"
+                note += "; self-referential, not a static rule"
             self._add_rule(
                 RuleCandidate(
                     id=f"rule:{table_key or 'function'}:{len(self.rules) + 1}",
@@ -1275,7 +1261,7 @@ class DumpLoader:
                     expression=f"{target} = {expression}",
                     columns=sorted(identifiers | {target}),
                     confidence=confidence,
-                    applied=enforce,
+                    applied=False,
                     provenance=provenance,
                     note=note,
                 )
@@ -1286,16 +1272,6 @@ class DumpLoader:
         if key in self._rule_keys:
             return
         self._rule_keys.add(key)
-        if rule.applied and rule.scope == "row" and rule.table in self.tables:
-            table = self.tables[rule.table]
-            table.checks.append(
-                CheckConstraint(
-                    name=rule.id,
-                    definition=f"CHECK ({rule.expression})",
-                    predicate=rule.expression,
-                    provenance=rule.provenance,
-                )
-            )
         self.rules.append(rule)
 
     # --------------------------------------------------------- relationships
@@ -1619,31 +1595,6 @@ def _identifiers(expression: str) -> set[str]:
             continue
         found.add(name)
     return found
-
-
-def _generation_supported(predicate: str) -> bool:
-    text = predicate.strip()
-    if re.search(r"\bSELECT\b", text, re.IGNORECASE):
-        return False
-    if re.search(
-        r"\b(?:now|current_timestamp|current_date|current_time|random|nextval|"
-        r"clock_timestamp|statement_timestamp|transaction_timestamp)\b",
-        text,
-        re.IGNORECASE,
-    ):
-        return False
-    literal = r"(?:\d+(?:\.\d+)?|'(?:[^']|'')*'|NULL|TRUE|FALSE)"
-    column = r"[A-Za-z_][A-Za-z0-9_]*"
-    patterns = [
-        rf"^{column}\s*(?:<=|>=|<>|!=|=|<|>)\s*{literal}$",
-        rf"^{column}\s+(?:NOT\s+)?IN\s*\(.*\)$",
-        rf"^{column}\s+IS\s+(?:NOT\s+)?NULL$",
-        rf"^(?:char_length|length)\s*\(\s*{column}\s*\)\s*(?:<=|<|=)\s*\d+$",
-        rf"^{column}\s*(?:<=|>=|<>|!=|=|<|>)\s*{column}$",
-        rf"^{column}\s*=\s*\(*\s*{column}\s*[+\-*/]\s*{column}\s*\)*$",
-        rf"^{column}\s*=\s*{column}$",
-    ]
-    return any(re.match(pattern, text, re.IGNORECASE) for pattern in patterns)
 
 
 def _derived_confidence(

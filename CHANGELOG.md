@@ -4,6 +4,33 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [0.7.0] — 2026-11-10
+
+### Changed
+
+- **Scope correction:** only declared table constraints define the generation
+  space. Trigger/function guards, `NEW.col :=` assignments and view filters are
+  segmentation rules; they are reported with provenance but are never added to
+  `table.checks` and never change the generation space.
+- `RuleCandidate.kind` is now `guard`, `derived` or `filter`, with
+  `category="segmentation"` and `applied=False` by design.
+- The HTML report labels rules as segmentation and no longer suggests they are
+  enforced constraints.
+
+### Added
+
+- **SQL INSERT export** without a database:
+  `pgproof generate --schema-file db/schema.sql --rows 1000 --sql data.sql`.
+  The file contains `BEGIN`, optional batched `TRUNCATE`, batched `INSERT`
+  statements, `setval` calls for identity columns and `COMMIT`.
+- `sql_literal` for safe SQL value rendering.
+- Integration test: generate a SQL file from a dump, apply it with `psql -f`,
+  and verify row counts and zero orphan foreign keys.
+
+### Measured
+
+- 113 tests passing.
+
 ## [0.6.0] — 2026-11-10
 
 ### Added
@@ -35,6 +62,9 @@ versioning.
 - 110 tests passing.
 
 ## [0.5.0] — 2026-11-10
+
+> **Superseded in 0.7.0:** extracted rules are segmentation candidates, not
+> constraints. They are no longer added to `table.checks`.
 
 ### Added
 

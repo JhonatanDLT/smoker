@@ -1,10 +1,11 @@
 # Status
 
 **Date:** 2026-11-10
-**Version:** 0.6.0
+**Version:** 0.7.0
 **State:** working v1 plus CI output, repair loop, distribution-aware
-generation, partitioned tables, offline schema dumps, code-derived rules and a
-dependency-safe creation order. Tested end to end against PostgreSQL 16.
+generation, partitioned tables, offline schema dumps, segmentation rules, a
+dependency-safe creation order and SQL export. Tested end to end against
+PostgreSQL 16.
 
 ---
 
@@ -18,7 +19,9 @@ dependency-safe creation order. Tested end to end against PostgreSQL 16.
 | `LIKE`, `INHERITS`, `ATTACH PARTITION`, CTEs and dynamic SQL | ✅ |
 | **Inferred foreign keys** from `*_id` naming and view JOINs | ✅ |
 | **Provenance** on tables, constraints, FKs, functions, triggers and raw objects | ✅ |
-| **Trigger/function rule extraction** (`RAISE EXCEPTION`, `NEW.col :=`) with provenance | ✅ |
+| **Segmentation extraction** (`RAISE EXCEPTION`, `NEW.col :=`, view filters) | ✅ report-only |
+| **Constraint space** defined only by table constraints; rules never change it | ✅ |
+| **SQL INSERT export** (`pgproof generate --sql`) from a dump, no database | ✅ |
 | **Rules in the report** (`rules[]`, HTML table) and per-invariant provenance | ✅ |
 | **View filters** classified as aggregate candidates (never applied as checks) | ✅ |
 | **Exclusion constraints** parsed and verified as declared constraints | ✅ |
@@ -85,15 +88,17 @@ dependency-safe creation order. Tested end to end against PostgreSQL 16.
 - Dump hardening: `LIKE ... INCLUDING ALL`, `INHERITS`, `ATTACH PARTITION`,
   CTE joins, dynamic SQL and `IF`/`CASE` conditions are extracted and covered by
   tests.
-- Rule extraction: `IF NEW.quantity <= 0 THEN RAISE EXCEPTION` becomes the
-  enforced check `quantity > 0`; `NEW.amount := NEW.quantity * NEW.unit_price`
-  becomes the derived rule `amount = quantity * unit_price`. Dump-only
-  generation of that schema passes end to end.
+- Segmentation extraction: `IF NEW.quantity <= 0 THEN RAISE EXCEPTION` and
+  `NEW.amount := NEW.quantity * NEW.unit_price` are reported as `guard` and
+  `derived` candidates with provenance. They never become table checks and do
+  not change the generation space; the trigger itself is still not replayed.
+- **SQL export:** a dump with two tables generated 7 deterministic rows into a
+  `.sql` file; `psql -f` loaded them with zero orphan foreign keys.
 - Creation order: `pgproof order` lists extensions, enums, types, domains,
   sequences, tables (FK order), functions, indexes, triggers, views, rules and
   policies, with `depends_on` per step.
 - `load-dump` and `plan` now include `creation_order` in their JSON output.
-- **110 tests passing** (unit, integration and architecture guards).
+- **113 tests passing** (unit, integration and architecture guards).
 - Same seed produces the same dataset hash every run.
 
 ## Documentation
@@ -148,20 +153,19 @@ cli ──► application ──► core (domain + ports)
 
 - Dump loading: `CREATE RULE`, event triggers and policies are stored raw but
   not applied; `CREATE TABLE ... AS SELECT` is stored raw.
-- PL/pgSQL bodies are stored and scanned for dynamic SQL and conditions. Simple
-  `IF ... RAISE` conditions and non-self-referential `NEW.col :=` assignments
-  become checks; compound conditions and non-deterministic assignments stay as
-  candidates.
-- Trigger effects are inventoried and their simple rules are enforced, but the
-  trigger is not replayed.
-- Rule extraction runs on `.sql` dumps; live introspection still inventories
-  functions and triggers without deriving rules from them.
+- PL/pgSQL bodies are stored and scanned for dynamic SQL and conditions.
+  `IF ... RAISE` and `NEW.col :=` become segmentation candidates with
+  provenance; they never become checks and never change the generation space.
+- Trigger effects are inventoried, not replayed.
+- Segmentation extraction runs on `.sql` dumps; live introspection still
+  inventories functions and triggers without deriving rules from them.
 - View filters are report-only aggregate candidates; they never constrain the
   base table or other candidates.
 - Inferred foreign keys are heuristic; check the `inferred` flag.
 - Exclusion constraints are parsed and verified with a `ctid` self-join, but the
   generator does not shape rows to satisfy them and partitioned tables need a
   manual review.
+- SQL export emits INSERT statements; the target schema must already exist.
 - Creation-order dependencies for views come from the parsed query; dynamic SQL
   inside functions is not expanded into dependencies.
 - Distributions are per column; correlations are not modelled.

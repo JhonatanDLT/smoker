@@ -7,6 +7,12 @@ This page exists because trust is built by publishing what you do **not** do.
 - Rows load into the target schema without violating `NOT NULL`, `UNIQUE`,
   primary keys, foreign keys, enum domains, and the `CHECK` constraints that the
   local rule parser understands.
+- The generation space is defined only by declared table constraints. Triggers,
+  functions, view filters and application rules are segmentation: they are
+  reported, but they never add or remove allowed values.
+- A schema loaded from a dump can be populated without a database:
+  `pgproof generate --schema-file schema.sql --sql data.sql` writes an
+  `INSERT` script that `psql -f` can apply.
 - Composite foreign keys are supported.
 - Partitioned tables are supported for range, list and hash keys, including
   multi-column keys and sub-partitioning. Introspection reads the partition
@@ -77,15 +83,14 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
 - PL/pgSQL and PL/SQL bodies are stored and scanned for dynamic SQL, `IF` and
   `CASE` conditions, and write/read targets. They are not interpreted; triggers
   are not replayed.
-- Only simple trigger/function rules become enforced checks: comparisons,
-  `IN`, `IS NOT NULL`, `BETWEEN`, `LIKE`, length limits and column-to-column
-  assignments. Compound conditions (`AND`/`OR`), unknown functions,
-  `now()`/`random()` and self-referential assignments are reported as
-  candidates with lower confidence.
-- Rules derived from a plain function (not used by a trigger) have no table
-  target and are reported but never applied.
-- Rule extraction runs on the offline dump loader. Live introspection still
-  inventories functions and triggers but does not derive rules from their
+- Trigger/function guards and assignments, and view filters, are **segmentation
+  candidates** only. They are reported with provenance and confidence, never
+  added to `table.checks`, and never change the generation space. The space is
+  bounded exclusively by the declared table constraints.
+- Segmentation rules derived from a plain function (not used by a trigger) have
+  no table target; they are reported but do not segment any table.
+- Segmentation extraction runs on the offline dump loader. Live introspection
+  still inventories functions and triggers but does not derive rules from their
   bodies.
 - `CREATE RULE`, event triggers and RLS policies are stored as raw objects but
   not applied.
@@ -114,6 +119,19 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
   remains the source of statements.
 - View filter rules are `scope="aggregate"` and report-only. They never become
   checks and never constrain the base table or other candidates.
+
+## SQL export limits
+
+- `pgproof generate --sql` emits `INSERT` statements, not a `COPY` block. The
+  file is valid for `psql -f` but is larger than a dump.
+- The target schema must already exist; the file does not create tables, types,
+  functions or triggers.
+- `TRUNCATE ... CASCADE` is emitted by default. Use `--no-truncate` when the
+  file will be applied to a schema with data that must be preserved.
+- Values are rendered as SQL literals. Strings are single-quote escaped; bytea,
+  JSON, arrays and timestamps rely on PostgreSQL input parsing.
+- `setval` calls are emitted for identity and `nextval` columns, but custom
+  sequence defaults are not otherwise modified.
 
 ## Distribution and repair limits
 

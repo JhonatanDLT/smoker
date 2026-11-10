@@ -140,15 +140,16 @@ class Provenance:
 @dataclass
 class RuleCandidate:
     id: str
-    kind: str  # check | derived | filter
+    kind: str  # guard | derived | filter (segmentation only)
     table: str
     expression: str
     columns: list[str] = field(default_factory=list)
     confidence: float = 0.0
-    applied: bool = False
+    applied: bool = False  # segmentation rules never bound the generation space
     provenance: Provenance | None = None
     note: str | None = None
     scope: str = "row"  # row | statement | aggregate
+    category: str = "segmentation"  # table constraints are not rules
 
 
 @dataclass
@@ -454,6 +455,7 @@ class Catalog:
                     provenance=_provenance(rule.get("provenance")),
                     note=rule.get("note"),
                     scope=rule.get("scope", "row"),
+                    category=rule.get("category", "segmentation"),
                 )
                 for rule in data.get("rules", [])
             ],

@@ -11,6 +11,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import psycopg
 import typer
@@ -21,6 +22,7 @@ from .adapters.postgres.introspect import connect, introspect
 from .adapters.postgres.profile import profile_catalog
 from .adapters.postgres.query_runner import PostgresQueryRunner
 from .adapters.postgres.sql_executor import PostgresSqlExecutor
+from .adapters.postgres.sql_file_writer import SqlFileWriter
 from .adapters.postgres.writer import PostgresRowWriter
 from .adapters.report import FileReportWriter, HtmlRenderer, JsonRenderer, JUnitRenderer
 from .adapters.report.audit_markdown import AuditMarkdownRenderer
@@ -442,18 +444,29 @@ def generate_cmd(
     schema_file: Path | None = typer.Option(
         None, "--schema-file", help="Load the catalog from a .sql dump"
     ),
+    sql_out: Path | None = typer.Option(
+        None,
+        "--sql",
+        help="Write INSERT statements to this .sql file instead of a target database",
+    ),
 ) -> None:
-    """Generate rows into the target database."""
+    """Generate rows into the target database, or into a .sql file."""
     source_dsn = _dsn(source, source_env) if schema_file is None else None
-    target_dsn = _dsn(target, target_env)
-    if source_dsn is not None and source_dsn == target_dsn:
-        typer.echo("warning: source and target are the same database", err=True)
+    target_dsn = None
+    if sql_out is None:
+        target_dsn = _dsn(target, target_env)
+        if source_dsn is not None and source_dsn == target_dsn:
+            typer.echo("warning: source and target are the same database", err=True)
 
     catalog = _load_catalog(
         catalog_path, source_dsn, schema, include, exclude, schema_file
     )
-    connection = psycopg.connect(target_dsn)
-    writer = PostgresRowWriter(connection)
+    writer: Any
+    if sql_out is not None:
+        writer = SqlFileWriter(sql_out, truncate=truncate_first)
+    else:
+        assert target_dsn is not None
+        writer = PostgresRowWriter(psycopg.connect(target_dsn))
     use_case = GenerateDataset(
         catalog,
         writer,
@@ -478,7 +491,11 @@ def generate_cmd(
 
     for warning in result.plan.warnings:
         typer.echo(f"warn: {warning}", err=True)
-    typer.echo(f"generated {sum(result.counts.values()):,} rows with seed {seed}")
+    total = sum(result.counts.values())
+    if sql_out is not None:
+        typer.echo(f"generated {total:,} rows with seed {seed} → {sql_out}")
+    else:
+        typer.echo(f"generated {total:,} rows with seed {seed}")
 
 
 @app.command("verify")

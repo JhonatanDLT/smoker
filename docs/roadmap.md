@@ -64,7 +64,13 @@ The order is deliberate: each phase is funded by the previous one.
 - Exclusion constraints parsed and verified.
 - View filters classified as aggregate report-only candidates.
 
-## v0.7 — SQL Server (months 4–6)
+## v0.7 — Scope correction and SQL export (delivered in 0.7.0)
+
+- Only table constraints define the generation space.
+- Trigger/function/view rules become segmentation candidates, report-only.
+- `pgproof generate --sql` writes INSERT statements from a dump with no database.
+
+## v0.8 — SQL Server (months 4–6)
 
 Only if two paying customers request it in writing.
 
@@ -74,7 +80,7 @@ Only if two paying customers request it in writing.
 - SQL Server as a **target** for generation.
 - Same invariant model, same report.
 
-## v0.8 — Other dialects (months 7–9)
+## v0.9 — Other dialects (months 7–9)
 
 - MySQL / MariaDB.
 - Oracle only with an enterprise contract that funds the work.

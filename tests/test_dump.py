@@ -328,7 +328,7 @@ def test_dump_only_generation_passes() -> None:
     assert report.verdict == "PASS"
 
 
-def test_trigger_rules_become_invariants() -> None:
+def test_trigger_rules_are_segmentation_only() -> None:
     dump = """
     CREATE TABLE accounts (
         id integer PRIMARY KEY,
@@ -358,19 +358,20 @@ def test_trigger_rules_become_invariants() -> None:
     catalog = DumpLoader().load(dump)
     rules = {(rule.kind, rule.expression): rule for rule in catalog.rules}
 
-    check = rules[("check", "amount >= 0")]
-    assert check.applied is True
-    assert check.table == "public.accounts"
-    assert check.columns == ["amount"]
-    assert check.provenance is not None
-    assert check.provenance.kind == "trigger"
-    assert check.confidence >= 0.9
+    guard = rules[("guard", "amount >= 0")]
+    assert guard.applied is False
+    assert guard.category == "segmentation"
+    assert guard.table == "public.accounts"
+    assert guard.columns == ["amount"]
+    assert guard.provenance is not None
+    assert guard.provenance.kind == "trigger"
+    assert guard.confidence >= 0.9
 
-    status = rules[("check", "status IN ('open', 'closed')")]
-    assert status.applied is True
+    status = rules[("guard", "status IN ('open', 'closed')")]
+    assert status.applied is False
 
     derived = rules[("derived", "total = subtotal + tax")]
-    assert derived.applied is True
+    assert derived.applied is False
     assert derived.columns == ["subtotal", "tax", "total"]
 
     noisy = rules[("derived", "updated_at = now()")]
@@ -378,9 +379,7 @@ def test_trigger_rules_become_invariants() -> None:
     assert noisy.confidence < 0.9
     assert noisy.columns == ["updated_at"]
 
-    predicates = {check.predicate for check in catalog.table("public.accounts").checks}
-    assert {"amount >= 0", "status IN ('open', 'closed')", "total = subtotal + tax"} <= predicates
-    assert "updated_at = now()" not in predicates
+    assert catalog.table("public.accounts").checks == []
 
 
 def test_function_rules_are_candidates_not_applied() -> None:
@@ -397,7 +396,8 @@ def test_function_rules_are_candidates_not_applied() -> None:
     catalog = DumpLoader().load(dump)
     rule = catalog.rules[0]
 
-    assert rule.kind == "check"
+    assert rule.kind == "guard"
+    assert rule.category == "segmentation"
     assert rule.table == ""
     assert rule.applied is False
     assert rule.provenance is not None
@@ -429,7 +429,7 @@ def test_compound_condition_is_a_low_confidence_candidate() -> None:
 
 @pytest.mark.integration
 @pytest.mark.skipif(not DSN, reason="PGPROOF_TEST_DSN is not set")
-def test_trigger_rules_drive_generation_and_verification() -> None:
+def test_trigger_rules_do_not_constrain_generation() -> None:
     assert DSN
     schema = "pgproof_rules_test"
     dump = f"""
@@ -461,11 +461,10 @@ def test_trigger_rules_drive_generation_and_verification() -> None:
     )
     catalog = DumpLoader().load(dump)
     table = catalog.table(f"{schema}.lines")
-    predicates = {check.predicate for check in table.checks}
 
-    assert "quantity > 0" in predicates
-    assert "amount = quantity * unit_price" in predicates
-    assert all(rule.applied for rule in catalog.rules)
+    assert table.checks == []
+    assert all(rule.applied is False for rule in catalog.rules)
+    assert all(rule.category == "segmentation" for rule in catalog.rules)
 
     connection = psycopg.connect(DSN)
     writer = PostgresRowWriter(connection)
@@ -485,7 +484,7 @@ def test_trigger_rules_drive_generation_and_verification() -> None:
         connection.close()
 
     assert report.verdict == "PASS"
-    assert any(result.provenance and "lines_enforce" in result.provenance for result in report.results)
+    assert all(result.kind != "check" for result in report.results)
 
 
 def test_nested_and_else_rules_are_not_overgeneralized() -> None:

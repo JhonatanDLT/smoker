@@ -188,7 +188,7 @@ Prints warnings for foreign-key cycles and tables without a primary key.
 
 ## `pgproof generate`
 
-Generates rows into the target database. Does not verify.
+Generates rows into the target database, or into a `.sql` file. Does not verify.
 
 | Option | Default | Description |
 |---|---|---|
@@ -197,20 +197,25 @@ Generates rows into the target database. Does not verify.
 | `--target` | — | Target DSN or env var name |
 | `--target-env` | `PGPROOF_TARGET_DSN` | Target env var |
 | `--schema-file` | — | Build the catalog from a `.sql` dump; the source DSN becomes optional |
+| `--sql` | — | Write `INSERT` statements to this file instead of a target database |
 | `--rows` | `1000` | Default rows per table |
 | `--seed` | `42` | Deterministic seed |
 | `--table-rows` | — | Per-table overrides |
-| `--truncate/--no-truncate` | truncate | Truncate the target first |
-| `--method` | `copy` | `copy` or `insert` |
+| `--truncate/--no-truncate` | truncate | Truncate the target first, or emit `TRUNCATE` in the SQL file |
+| `--method` | `copy` | `copy` or `insert` (database mode) |
 | `--catalog` | — | Reuse a saved catalog JSON |
 | `--profile` | — | Profile JSON from `pgproof profile` |
 
 ```bash
 pgproof generate --rows 5000 --seed 42 --profile profile.json
+pgproof generate --schema-file db/schema.sql --rows 1000 --sql data.sql
+psql -d target -f data.sql
 ```
 
-Self-referencing tables fall back to `COPY` even with `--method insert`: a
-row-by-row insert cannot reference a row that has not been inserted yet.
+SQL export writes `BEGIN`, optional batched `TRUNCATE`, batched `INSERT`
+statements, `setval` calls for identity columns and `COMMIT`. The target schema
+must already exist. Self-referencing tables fall back to `COPY` only in database
+mode; SQL export always uses `INSERT`.
 
 ---
 

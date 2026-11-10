@@ -74,7 +74,7 @@ open proof/report.html
 Expected output:
 
 ```
-pgproof 0.6.0 · 10 tables · 2,000 rows · seed 42
+pgproof 0.7.0 · 10 tables · 2,000 rows · seed 42
   generate billing.accounts        200 rows
   generate billing.plans           200 rows
   ...
@@ -115,6 +115,7 @@ Common options:
 --fail-on              never, error, fail (default: fail)
 --max-passes           repair fixed-point limit (default: 3)
 --truncate/--no-truncate
+--sql                  write INSERT statements to a file instead of a database
 ```
 
 `pgproof` exits `1` when the report verdict is `FAIL`, so it drops straight into
@@ -183,20 +184,25 @@ constraints, enums, domains, partitions, functions, triggers and views.
 ```bash
 pgproof load-dump db/schema.sql -o catalog.json
 pgproof run --schema-file db/schema.sql --target-env PGPROOF_TARGET_DSN --out proof
+pgproof generate --schema-file db/schema.sql --rows 1000 --sql data.sql
 ```
 
+The last command writes the `INSERT` statements without connecting to a
+database; apply them with `psql -f data.sql` after creating the schema.
+
+**The generation space is defined only by the table constraints** (`NOT NULL`,
+types and enums, primary keys, `UNIQUE`, foreign keys, `CHECK` and `EXCLUDE`).
 Relationships come from declared foreign keys. When a dump omits them, pgproof
 infers them from `*_id` naming and from `JOIN`s in views, and marks them as
 `inferred`. `LIKE`, `INHERITS`, `ATTACH PARTITION`, CTEs and dynamic SQL are
 expanded or scanned, and every extracted object carries provenance.
 
-Trigger and function bodies are also scanned. A simple guard such as
-`IF NEW.quantity <= 0 THEN RAISE EXCEPTION` becomes the check
-`quantity > 0`, and `NEW.amount := NEW.quantity * NEW.unit_price` becomes the
-derived rule `amount = quantity * unit_price`. Deterministic rules are enforced
-during generation and verified; the rest are reported as lower-confidence
-candidates with their provenance. View filters are reported as aggregate
-candidates and never constrain the base table.
+Trigger and function bodies are also scanned, but only for **segmentation**.
+`IF NEW.quantity <= 0 THEN RAISE EXCEPTION` and
+`NEW.amount := NEW.quantity * NEW.unit_price` are reported as candidates with
+provenance; they never become table checks and never expand or shrink the
+constraint space. The same applies to view filters, which are aggregate-scope
+candidates.
 
 `pgproof order --schema-file db/schema.sql -o -` lists extensions, enums, types,
 domains, sequences, tables in foreign-key order, functions, indexes, triggers,
