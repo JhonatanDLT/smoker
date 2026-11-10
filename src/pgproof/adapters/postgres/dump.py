@@ -26,6 +26,8 @@ from ...core.ir import (
     CheckConstraint,
     Column,
     DataKind,
+    ExclusionConstraint,
+    ExclusionElement,
     ForeignKey,
     Function,
     Partition,
@@ -41,6 +43,7 @@ from .introspect import parse_partition_bound
 _IDENT = r'(?:"[^"]+"|[\w$]+)'
 _QUALIFIED = rf"{_IDENT}(?:\.{_IDENT})?"
 _WS = r"\s+"
+_EXCLUDE = getattr(exp, "ExcludeColumnConstraint", None)
 logger = logging.getLogger(__name__)
 
 
@@ -299,10 +302,12 @@ class DumpLoader:
             "materialized_view": rf"CREATE{_WS}MATERIALIZED{_WS}VIEW{_WS}({_QUALIFIED})",
             "rule": rf"CREATE{_WS}(?:OR{_WS}REPLACE{_WS})?RULE{_WS}({_QUALIFIED})",
             "policy": rf"CREATE{_WS}POLICY{_WS}({_QUALIFIED})",
-            "sequence": rf"CREATE{_WS}SEQUENCE{_WS}({_QUALIFIED})",
-            "extension": rf"CREATE{_WS}EXTENSION{_WS}({_IDENT})",
+            "sequence": rf"CREATE{_WS}SEQUENCE{_WS}(?:IF{_WS}NOT{_WS}EXISTS{_WS})?({_QUALIFIED})",
+            "extension": rf"CREATE{_WS}EXTENSION{_WS}(?:IF{_WS}NOT{_WS}EXISTS{_WS})?({_IDENT})",
             "type": rf"CREATE{_WS}TYPE{_WS}({_QUALIFIED})",
-            "index": rf"CREATE{_WS}(?:UNIQUE{_WS})?INDEX{_WS}({_QUALIFIED})",
+            "enum": rf"CREATE{_WS}TYPE{_WS}({_QUALIFIED}){_WS}AS{_WS}ENUM",
+            "domain": rf"CREATE{_WS}DOMAIN{_WS}({_QUALIFIED})",
+            "index": rf"CREATE{_WS}(?:UNIQUE{_WS})?INDEX{_WS}(?:CONCURRENTLY{_WS})?(?:IF{_WS}NOT{_WS}EXISTS{_WS})?({_QUALIFIED})",
             "foreign_table": rf"CREATE{_WS}FOREIGN{_WS}TABLE{_WS}({_QUALIFIED})",
         }
         schema = name = None
@@ -310,7 +315,10 @@ class DumpLoader:
         if pattern:
             match = re.search(pattern, statement, re.IGNORECASE | re.DOTALL)
             if match:
-                schema, name = self._qualified(match.group(1))
+                if kind == "extension":
+                    schema, name = None, _unquote(match.group(1))
+                else:
+                    schema, name = self._qualified(match.group(1))
         self.objects.append(
             SqlObject(
                 kind=kind,
@@ -318,8 +326,42 @@ class DumpLoader:
                 name=name,
                 definition=statement,
                 provenance=self._prov("dump", statement, kind),
+                depends_on=self._object_dependencies(kind, schema, name, statement),
             )
         )
+
+    def _object_dependencies(
+        self, kind: str, schema: str | None, name: str | None, statement: str
+    ) -> list[str]:
+        dependencies: list[str] = []
+        if kind in {"view", "materialized_view"}:
+            try:
+                tree = sqlglot.parse_one(statement, read="postgres")
+            except Exception as exc:  # noqa: BLE001 - a raw view is still stored
+                logger.debug("cannot parse view dependencies: %s", exc)
+                tree = None
+            if tree is not None:
+                own = self._table_key(schema, name) if schema and name else None
+                for table in tree.find_all(exp.Table):
+                    table_schema = table.db or self.search_path[0]
+                    dependency = self._table_key(table_schema, table.name)
+                    if dependency != own and dependency not in dependencies:
+                        dependencies.append(dependency)
+        elif kind in {"rule", "policy", "index"}:
+            patterns = {
+                "rule": rf"\bTO{_WS}({_QUALIFIED})",
+                "policy": rf"\bON{_WS}({_QUALIFIED})",
+                "index": rf"\bON{_WS}({_QUALIFIED})",
+            }
+            match = re.search(patterns[kind], statement, re.IGNORECASE)
+            if match:
+                dependency_schema, dependency_name = self._qualified(
+                    match.group(1), schema
+                )
+                dependencies.append(
+                    self._table_key(dependency_schema, dependency_name)
+                )
+        return dependencies
 
     # ----------------------------------------------------------------- basics
     def _qualified(self, name: str, default_schema: str | None = None) -> tuple[str, str]:
@@ -369,6 +411,7 @@ class DumpLoader:
             ]
             self.enums[f"{schema}.{name}"] = values
             self.enums.setdefault(name, values)
+            self._store_object("enum", statement)
             return
         self._store_object("type", statement)
 
@@ -386,6 +429,7 @@ class DumpLoader:
         check = match.group(3).strip() if match.group(3) else None
         self.domains[f"{schema}.{name}"] = (base_type, check)
         self.domains.setdefault(name, (base_type, check))
+        self._store_object("domain", statement)
 
     def _enum_values(self, sql_type: str) -> list[str]:
         name = _unquote(sql_type.strip())
@@ -456,7 +500,7 @@ class DumpLoader:
                     exp.UniqueColumnConstraint,
                     exp.CheckColumnConstraint,
                 ),
-            ):
+            ) or (_EXCLUDE is not None and isinstance(node, _EXCLUDE)):
                 self._apply_constraint(table, None, node, statement)
 
         for prop in tree.find_all(exp.InheritsProperty):
@@ -600,6 +644,8 @@ class DumpLoader:
                     provenance=provenance,
                 )
             )
+        elif _EXCLUDE is not None and isinstance(node, _EXCLUDE):
+            self._add_exclusion(table, name, node, statement, provenance)
         elif isinstance(node, exp.ForeignKey):
             columns = [item.name for item in node.expressions]
             reference = node.args.get("reference")
@@ -611,6 +657,60 @@ class DumpLoader:
                     reference,
                     provenance,
                 )
+
+    def _add_exclusion(
+        self,
+        table: Table,
+        name: str | None,
+        node: Any,
+        statement: str,
+        provenance: Provenance,
+    ) -> None:
+        params = node.this
+        if not isinstance(params, exp.IndexParameters):
+            return
+        elements: list[ExclusionElement] = []
+        for item in params.args.get("columns") or []:
+            if not isinstance(item, exp.WithOperator):
+                continue
+            target = item.this
+            if isinstance(target, exp.Ordered):
+                target = target.this
+            if not isinstance(target, exp.Column):
+                continue
+            operator = item.args.get("op")
+            operator_name = operator.name if hasattr(operator, "name") else str(operator)
+            if operator_name:
+                elements.append(
+                    ExclusionElement(column=target.name, operator=operator_name)
+                )
+        if not elements:
+            return
+        where = params.args.get("where")
+        predicate = None
+        if where is not None:
+            predicate = (
+                where.this.copy()
+                .transform(
+                    lambda node: (
+                        exp.column(node.name, table="a")
+                        if isinstance(node, exp.Column) and not node.table
+                        else node
+                    )
+                )
+                .sql(dialect="postgres")
+            )
+        method = params.args.get("using")
+        table.exclusions.append(
+            ExclusionConstraint(
+                name=name or f"{table.name}_{elements[0].column}_excl",
+                elements=elements,
+                method=method.name if hasattr(method, "name") else None,
+                predicate=predicate,
+                definition=statement,
+                provenance=provenance,
+            )
+        )
 
     def _add_foreign_key(
         self,
@@ -1186,7 +1286,7 @@ class DumpLoader:
         if key in self._rule_keys:
             return
         self._rule_keys.add(key)
-        if rule.applied and rule.table in self.tables:
+        if rule.applied and rule.scope == "row" and rule.table in self.tables:
             table = self.tables[rule.table]
             table.checks.append(
                 CheckConstraint(
@@ -1244,11 +1344,7 @@ class DumpLoader:
         return None
 
     def _infer_joins_from_query(self, query: Any, provenance: Provenance) -> None:
-        aliases: dict[str, tuple[str, str]] = {}
-        for table in query.find_all(exp.Table):
-            schema = table.db or self.search_path[0]
-            aliases[table.alias_or_name] = (schema, table.name)
-            aliases[f"{schema}.{table.name}"] = (schema, table.name)
+        aliases = self._query_aliases(query)
         for join in query.find_all(exp.Join):
             on = join.args.get("on")
             if not isinstance(on, exp.EQ):
@@ -1267,6 +1363,61 @@ class DumpLoader:
                 self._add_inferred_fk(right_table, right_column, left_table, left_column, provenance)
             elif right_column in right_table.primary_key and left_column not in left_table.primary_key:
                 self._add_inferred_fk(left_table, left_column, right_table, right_column, provenance)
+
+    def _query_aliases(self, query: Any) -> dict[str, tuple[str, str]]:
+        aliases: dict[str, tuple[str, str]] = {}
+        for table in query.find_all(exp.Table):
+            schema = table.db or self.search_path[0]
+            aliases[table.alias_or_name] = (schema, table.name)
+            aliases[f"{schema}.{table.name}"] = (schema, table.name)
+        return aliases
+
+    def _filters_from_query(
+        self, query: Any, statement: str, provenance: Provenance
+    ) -> None:
+        aliases = self._query_aliases(query)
+        for where in query.find_all(exp.Where):
+            predicate_node = where.this
+            if predicate_node is None:
+                continue
+            predicate = predicate_node.sql(dialect="postgres")
+            table_key = self._filter_table(predicate_node, aliases)
+            self._add_rule(
+                RuleCandidate(
+                    id=f"rule:filter:{len(self.rules) + 1}",
+                    kind="filter",
+                    table=table_key,
+                    expression=predicate,
+                    columns=sorted(_identifiers(predicate)),
+                    confidence=0.7,
+                    applied=False,
+                    provenance=provenance,
+                    note=f"view filter in {provenance.source}",
+                    scope="aggregate",
+                )
+            )
+
+    def _filter_table(
+        self, predicate: Any, aliases: dict[str, tuple[str, str]]
+    ) -> str:
+        tables: list[str] = []
+        for column in predicate.find_all(exp.Column):
+            if column.table:
+                resolved = self._resolve_column(column, aliases)
+                if resolved is not None:
+                    tables.append(resolved[0].key)
+                continue
+            matches = []
+            for schema, name in aliases.values():
+                table = self.tables.get(self._table_key(schema, name))
+                if table is not None and any(
+                    item.name == column.name for item in table.columns
+                ):
+                    matches.append(table.key)
+            if len(set(matches)) == 1:
+                tables.append(matches[0])
+        unique = sorted(set(tables))
+        return unique[0] if len(unique) == 1 else ""
 
     def _resolve_column(
         self, column: exp.Column, aliases: dict[str, tuple[str, str]]
@@ -1321,9 +1472,9 @@ class DumpLoader:
         except Exception:  # noqa: BLE001 - a view we cannot parse is still stored raw
             return
         if isinstance(tree, exp.Create) and tree.expression is not None:
-            self._infer_joins_from_query(
-                tree.expression, Provenance(kind, statement.splitlines()[0][:200])
-            )
+            provenance = Provenance(kind, statement.splitlines()[0][:200])
+            self._infer_joins_from_query(tree.expression, provenance)
+            self._filters_from_query(tree.expression, statement, provenance)
 
 
 def _clean_sql(text: str) -> str:

@@ -103,6 +103,7 @@ constraints; they are code-derived candidates.
     "columns": ["amount", "quantity", "unit_price"],
     "confidence": 0.9,
     "applied": true,
+    "scope": "row",
     "provenance": {
       "kind": "trigger",
       "source": "invoice_lines_amount",
@@ -113,13 +114,17 @@ constraints; they are code-derived candidates.
 ]
 ```
 
-- `kind` is `check` (from `IF … RAISE`) or `derived` (from `NEW.col := …`).
+- `kind` is `check` (from `IF … RAISE`), `derived` (from `NEW.col := …`)
+  or `filter` (from a view `WHERE`).
 - `confidence` is `0.0`–`1.0`; only `applied = true` rules are enforced as
   checks and included in generation.
+- `scope` is `row` for trigger/function rules and `aggregate` for view
+  filters. Aggregate rules are report-only: they scope a view, never the base
+  table, and do not affect other candidates.
 - `applied = false` means the rule is reported but needs review: compound
-  conditions, unknown functions, `now()`, `random()`, or self-referential
-  assignments.
-- `provenance.kind` is `trigger` or `function`.
+  conditions, unknown functions, `now()`, `random()`, self-referential
+  assignments or a view filter.
+- `provenance.kind` is `trigger`, `function` or `view`.
 
 ## Hashes
 

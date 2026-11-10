@@ -31,11 +31,12 @@ from .application.policy import FailPolicy, should_fail
 from .application.repair import RepairDataset
 from .application.run import RunPipeline
 from .application.verify import VerifyDataset, VerifyRequest
+from .core.creation import creation_order
 from .core.errors import LoadError, RepairError
 from .core.filters import filter_catalog, split_patterns
 from .core.generator import GenerationError
 from .core.invariants import semantic_for_catalog
-from .core.ir import Catalog
+from .core.ir import Catalog, to_plain
 from .core.planner import PlanError, build_plan
 from .core.profile import Profile
 
@@ -228,15 +229,69 @@ def load_dump_cmd(
     """Load a schema dump (.sql) and save the catalog as JSON."""
     catalog = _apply_filters(load_dump(file), schema, include, exclude)
     semantic_for_catalog(catalog)
+    payload = catalog.to_dict()
+    payload["creation_order"] = to_plain(creation_order(catalog))
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(
-        json.dumps(catalog.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8"
+        json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     typer.echo(
         f"{len(catalog.tables)} tables · "
         f"{sum(len(table.columns) for table in catalog.tables)} columns · "
         f"{len(catalog.functions)} functions → {out}"
     )
+
+
+@app.command("order")
+def order_cmd(
+    dsn: str | None = typer.Option(None, "--dsn"),
+    dsn_env: str = typer.Option("PGPROOF_SOURCE_DSN", "--dsn-env"),
+    schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
+    include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
+    exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
+    schema_file: Path | None = typer.Option(
+        None, "--schema-file", help="Load the catalog from a .sql dump"
+    ),
+    out: Path = typer.Option(
+        Path("order.txt"), "--out", "-o", help="Use - to print to stdout"
+    ),
+    output_format: str = typer.Option(
+        "text", "--format", help="text or json"
+    ),
+) -> None:
+    """Show a dependency-safe creation and insertion order."""
+    catalog = _load_catalog(
+        None,
+        _dsn(dsn, dsn_env) if schema_file is None else None,
+        schema,
+        include,
+        exclude,
+        schema_file,
+    )
+    order = creation_order(catalog)
+    if output_format == "json":
+        text = json.dumps(to_plain(order), indent=2, ensure_ascii=False)
+    elif output_format == "text":
+        lines = []
+        for step in order.steps:
+            marker = "!" if step.cycle else " "
+            suffix = (
+                f"  <- {', '.join(step.depends_on)}" if step.depends_on else ""
+            )
+            lines.append(f"{marker} {step.phase:<16} {step.name}{suffix}")
+        text = "\n".join(lines) + "\n"
+    else:
+        _fail(f"unknown format: {output_format!r}; use text or json")
+        return
+
+    for warning in order.warnings:
+        typer.echo(f"warn: {warning}", err=True)
+    if str(out) == "-":
+        typer.echo(text, nl=False)
+        return
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8")
+    typer.echo(f"{len(order.steps)} steps → {out}")
 
 
 @app.command("plan")
@@ -280,6 +335,7 @@ def plan_cmd(
             key: {"rows": value.rows, "parents": value.parents}
             for key, value in plan.tables.items()
         },
+        "creation_order": to_plain(creation_order(catalog)),
     }
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, indent=2), encoding="utf-8")

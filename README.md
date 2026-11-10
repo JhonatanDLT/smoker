@@ -74,7 +74,7 @@ open proof/report.html
 Expected output:
 
 ```
-pgproof 0.5.0 · 10 tables · 2,000 rows · seed 42
+pgproof 0.6.0 · 10 tables · 2,000 rows · seed 42
   generate billing.accounts        200 rows
   generate billing.plans           200 rows
   ...
@@ -89,6 +89,7 @@ RESULT PASS · 63 passed · 0 failed · 0 errors · 2 skipped · 0 violations
 |---|---|
 | `pgproof introspect` | Save the catalog as JSON |
 | `pgproof load-dump` | Build the catalog from a `.sql` dump |
+| `pgproof order` | Show a dependency-safe creation and insertion order |
 | `pgproof audit` | Produce a Markdown schema readiness audit |
 | `pgproof profile` | Sample the source and save a distribution profile |
 | `pgproof plan` | Build a generation plan without touching data |
@@ -126,6 +127,7 @@ CI.
 - `NOT NULL`, `UNIQUE`, primary keys
 - Foreign keys, including composite keys
 - `CHECK` constraints, including arithmetic and column-to-column comparisons
+- Exclusion constraints (`EXCLUDE`) parsed from a dump
 - Enum domains
 - Composite unique keys
 - Application rules declared in `--spec`
@@ -193,7 +195,12 @@ Trigger and function bodies are also scanned. A simple guard such as
 `quantity > 0`, and `NEW.amount := NEW.quantity * NEW.unit_price` becomes the
 derived rule `amount = quantity * unit_price`. Deterministic rules are enforced
 during generation and verified; the rest are reported as lower-confidence
-candidates with their provenance.
+candidates with their provenance. View filters are reported as aggregate
+candidates and never constrain the base table.
+
+`pgproof order --schema-file db/schema.sql -o -` lists extensions, enums, types,
+domains, sequences, tables in foreign-key order, functions, indexes, triggers,
+views, rules and policies, with the dependencies of each step.
 
 ## Repairs
 

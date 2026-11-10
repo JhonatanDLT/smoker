@@ -16,6 +16,7 @@ from pgproof.adapters.spec.yaml_loader import YamlSpecLoader
 from pgproof.application.generate import GenerateDataset
 from pgproof.application.verify import VerifyDataset, VerifyRequest
 from pgproof.core.filters import filter_catalog
+from pgproof.core.invariants import InvariantKind, invariants_from_catalog
 
 DSN = os.environ.get("PGPROOF_TEST_DSN")
 ROOT = Path(__file__).resolve().parents[1]
@@ -511,3 +512,68 @@ def test_nested_and_else_rules_are_not_overgeneralized() -> None:
 
     assert catalog.rules == []
     assert catalog.table("public.t").checks == []
+
+
+def test_exclusion_constraint_is_a_declared_constraint() -> None:
+    dump = """
+    CREATE TABLE booking (
+        id integer PRIMARY KEY,
+        room integer NOT NULL,
+        during tsrange NOT NULL,
+        active boolean NOT NULL DEFAULT true,
+        CONSTRAINT no_overlap EXCLUDE USING gist (room WITH =, during WITH &&) WHERE (active)
+    );
+    """
+    catalog = DumpLoader().load(dump)
+    table = catalog.table("public.booking")
+    exclusion = table.exclusions[0]
+
+    assert exclusion.name == "no_overlap"
+    assert exclusion.method == "gist"
+    assert [(element.column, element.operator) for element in exclusion.elements] == [
+        ("room", "="),
+        ("during", "&&"),
+    ]
+    assert exclusion.predicate == "(a.active)"
+    assert exclusion.provenance is not None
+
+    invariant = next(
+        item
+        for item in invariants_from_catalog(catalog)
+        if item.kind == InvariantKind.EXCLUSION
+    )
+    assert 'a."room" = b."room"' in invariant.violation_sql
+    assert 'a."during" && b."during"' in invariant.violation_sql
+    assert "(a.active)" in invariant.violation_sql
+    assert invariant.provenance == "CREATE TABLE booking ("
+
+
+def test_exclusion_constraint_from_alter_table() -> None:
+    dump = """
+    CREATE TABLE booking (id integer PRIMARY KEY, room integer, during tsrange);
+    ALTER TABLE booking
+        ADD CONSTRAINT no_overlap EXCLUDE USING gist (room WITH =, during WITH &&);
+    """
+    catalog = DumpLoader().load(dump)
+    exclusion = catalog.table("public.booking").exclusions[0]
+
+    assert [element.operator for element in exclusion.elements] == ["=", "&&"]
+    assert exclusion.predicate is None
+
+
+def test_view_filter_is_an_aggregate_candidate() -> None:
+    dump = """
+    CREATE TABLE orders (id integer PRIMARY KEY, status text);
+    CREATE VIEW paid_orders AS
+        SELECT id FROM orders WHERE status = 'paid';
+    """
+    catalog = DumpLoader().load(dump)
+    rule = next(item for item in catalog.rules if item.kind == "filter")
+
+    assert rule.table == "public.orders"
+    assert rule.expression == "status = 'paid'"
+    assert rule.scope == "aggregate"
+    assert rule.applied is False
+    assert rule.provenance is not None
+    assert rule.provenance.kind == "view"
+    assert catalog.table("public.orders").checks == []

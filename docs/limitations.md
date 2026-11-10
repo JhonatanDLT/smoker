@@ -35,7 +35,7 @@ This page exists because trust is built by publishing what you do **not** do.
 |---|---|---|
 | Trigger side effects | `skipped` | We inventory triggers but do not replay them. A trigger that inserts into an audit table will not be simulated. |
 | Stored procedures and rules | not analyzed | Only trigger functions are read, and only their body is stored. `CREATE RULE` (`pg_rewrite`) and event triggers are not scanned. |
-| Exclusion constraints (`EXCLUDE`) | `skipped` | Not generated against; PostgreSQL enforces them at load time. |
+| Exclusion constraints (`EXCLUDE`) | verified, not generated against | Parsed from `CREATE TABLE` and `ALTER TABLE`; the verifier self-joins on `ctid`. The generator does not shape rows to avoid overlaps, and partitioned tables need manual review. |
 | Cross-table business rules | not enforced | `invoice.total = SUM(lines.amount)` requires a repair pass that v1 does not have. Declare it in the spec and it will be verified, not fixed. |
 | `INSERT` mode with self-references | falls back to `COPY` | A row-by-row insert cannot reference a row that has not been inserted yet. |
 | Distributions | sampled, optional | `TABLESAMPLE` above 50k rows; `LIMIT` below that and on partitioned parents. Independent per column. |
@@ -101,6 +101,19 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
   indexes are stored as raw objects.
 - `ALTER TABLE ... ATTACH PARTITION` is processed; `DETACH PARTITION` and
   `DETACH PARTITION ... CONCURRENTLY` are not.
+
+## Creation-order limits
+
+- View dependencies come from the parsed `SELECT`; dependencies inside dynamic
+  SQL in a function are not expanded.
+- Rules and policies are ordered after the table they act on, but their internal
+  references to functions or views are not resolved.
+- Foreign-key cycles are ordered together and flagged; the order inside a cycle
+  is alphabetical.
+- The order lists steps; it does not emit the DDL itself. The original dump
+  remains the source of statements.
+- View filter rules are `scope="aggregate"` and report-only. They never become
+  checks and never constrain the base table or other candidates.
 
 ## Distribution and repair limits
 

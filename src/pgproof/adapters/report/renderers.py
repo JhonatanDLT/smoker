@@ -186,6 +186,7 @@ def _rules_block(report: Report) -> str:
         f"<td><code>{html.escape(str(rule.get('expression', '')))}</code></td>"
         f"<td>{html.escape(str(rule.get('confidence', '')))}</td>"
         f"<td>{'yes' if rule.get('applied') else 'no'}</td>"
+        f"<td>{html.escape(str(rule.get('scope', 'row')))}</td>"
         f"<td>{html.escape(str((rule.get('provenance') or {}).get('kind', '')))}</td>"
         f"<td>{html.escape(str(rule.get('note') or ''))}</td></tr>"
         for rule in rules
@@ -193,10 +194,12 @@ def _rules_block(report: Report) -> str:
     return (
         "<h2>Extracted rules</h2>"
         "<table><thead><tr><th>Kind</th><th>Table</th><th>Expression</th>"
-        "<th>Confidence</th><th>Applied</th><th>Provenance</th><th>Note</th></tr>"
+        "<th>Confidence</th><th>Applied</th><th>Scope</th><th>Provenance</th><th>Note</th></tr>"
         f"</thead><tbody>{rows}</tbody></table>"
-        "<p class=\"sub\">Rules come from trigger and function bodies. Declared "
-        "constraints are verified separately; these are derived from code.</p>"
+        "<p class=\"sub\">Rules come from trigger and function bodies and from "
+        "view filters. Declared constraints are verified separately; these are "
+        "derived from code. Aggregate-scope filters affect only their view and "
+        "never constrain the base table.</p>"
     )
 
 

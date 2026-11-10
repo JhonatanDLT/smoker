@@ -57,7 +57,14 @@ The order is deliberate: each phase is funded by the previous one.
 - Show rules and provenance in JSON and HTML.
 - End-to-end test from dump to generated data to verified report.
 
-## v0.6 — SQL Server (months 4–6)
+## v0.6 — Creation order and declared exclusions (delivered in 0.6.0)
+
+- Dependency-safe creation order (`pgproof order`).
+- `creation_order` in `load-dump` and `plan`.
+- Exclusion constraints parsed and verified.
+- View filters classified as aggregate report-only candidates.
+
+## v0.7 — SQL Server (months 4–6)
 
 Only if two paying customers request it in writing.
 
@@ -67,7 +74,7 @@ Only if two paying customers request it in writing.
 - SQL Server as a **target** for generation.
 - Same invariant model, same report.
 
-## v0.7 — Other dialects (months 7–9)
+## v0.8 — Other dialects (months 7–9)
 
 - MySQL / MariaDB.
 - Oracle only with an enterprise contract that funds the work.

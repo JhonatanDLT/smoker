@@ -1,10 +1,10 @@
 # Status
 
 **Date:** 2026-11-10
-**Version:** 0.5.0
+**Version:** 0.6.0
 **State:** working v1 plus CI output, repair loop, distribution-aware
-generation, partitioned tables, offline schema dumps and code-derived rules.
-Tested end to end against PostgreSQL 16.
+generation, partitioned tables, offline schema dumps, code-derived rules and a
+dependency-safe creation order. Tested end to end against PostgreSQL 16.
 
 ---
 
@@ -20,6 +20,9 @@ Tested end to end against PostgreSQL 16.
 | **Provenance** on tables, constraints, FKs, functions, triggers and raw objects | ✅ |
 | **Trigger/function rule extraction** (`RAISE EXCEPTION`, `NEW.col :=`) with provenance | ✅ |
 | **Rules in the report** (`rules[]`, HTML table) and per-invariant provenance | ✅ |
+| **View filters** classified as aggregate candidates (never applied as checks) | ✅ |
+| **Exclusion constraints** parsed and verified as declared constraints | ✅ |
+| **Dependency-safe creation order** (`pgproof order`) | ✅ |
 | Invariants from NOT NULL, UNIQUE, PK, FK, CHECK, enums | ✅ |
 | Application rules from YAML spec | ✅ |
 | Deterministic generation (seed per table) | ✅ |
@@ -86,7 +89,11 @@ Tested end to end against PostgreSQL 16.
   enforced check `quantity > 0`; `NEW.amount := NEW.quantity * NEW.unit_price`
   becomes the derived rule `amount = quantity * unit_price`. Dump-only
   generation of that schema passes end to end.
-- **102 tests passing** (unit, integration and architecture guards).
+- Creation order: `pgproof order` lists extensions, enums, types, domains,
+  sequences, tables (FK order), functions, indexes, triggers, views, rules and
+  policies, with `depends_on` per step.
+- `load-dump` and `plan` now include `creation_order` in their JSON output.
+- **110 tests passing** (unit, integration and architecture guards).
 - Same seed produces the same dataset hash every run.
 
 ## Documentation
@@ -149,8 +156,14 @@ cli ──► application ──► core (domain + ports)
   trigger is not replayed.
 - Rule extraction runs on `.sql` dumps; live introspection still inventories
   functions and triggers without deriving rules from them.
+- View filters are report-only aggregate candidates; they never constrain the
+  base table or other candidates.
 - Inferred foreign keys are heuristic; check the `inferred` flag.
-- Exclusion constraints are not generated against.
+- Exclusion constraints are parsed and verified with a `ctid` self-join, but the
+  generator does not shape rows to satisfy them and partitioned tables need a
+  manual review.
+- Creation-order dependencies for views come from the parsed query; dynamic SQL
+  inside functions is not expanded into dependencies.
 - Distributions are per column; correlations are not modelled.
 - No parallel verification yet.
 - Cross-table rules need an explicit `repair:` declaration.
@@ -160,13 +173,9 @@ See [`docs/limitations.md`](docs/limitations.md).
 
 ## Next tasks
 
-1. Build the creation/insertion order from provenance and dependencies (types,
-   sequences, tables in FK order, functions, triggers, views, rules, policies).
-2. Wire the order into `load-dump`, `plan` and the report, so a dump can be
-   replayed in a dependency-safe order.
-3. Column correlations and parallel verification.
-4. SQL Server adapter.
-5. Publish to PyPI and the GitHub Marketplace; first design-partner pilot.
+1. Column correlations and parallel verification.
+2. SQL Server adapter.
+3. Publish to PyPI and the GitHub Marketplace; first design-partner pilot.
 
 ## Decision rules
 

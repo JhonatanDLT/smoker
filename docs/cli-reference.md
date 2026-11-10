@@ -16,7 +16,7 @@ Every command accepts `--dsn` or `--dsn-env`.
 
 | Command | Default variable |
 |---|---|
-| `introspect`, `audit`, `profile`, `plan` | `PGPROOF_SOURCE_DSN` |
+| `introspect`, `audit`, `profile`, `plan`, `order` | `PGPROOF_SOURCE_DSN` |
 | `verify` | `PGPROOF_TARGET_DSN` |
 | `generate`, `run` | `PGPROOF_SOURCE_DSN` and `PGPROOF_TARGET_DSN` |
 
@@ -27,7 +27,7 @@ artifact.
 ### Catalog filters
 
 `--schema`, `--include` and `--exclude` restrict which tables are introspected.
-They apply to `introspect`, `audit`, `profile`, `plan`, `generate`, `verify` and
+They apply to `introspect`, `audit`, `profile`, `plan`, `order`, `generate`, `verify` and
 `run`, and they also work with a saved `--catalog`.
 
 | Option | Description |
@@ -92,6 +92,30 @@ Builds the catalog from a schema dump (`.sql`) without a database connection.
 ```bash
 pgproof load-dump db/schema.sql -o catalog.json
 ```
+
+The JSON also contains `creation_order`, the dependency-safe order described
+under `pgproof order`.
+
+## `pgproof order`
+
+Prints the creation and insertion order for a catalog: extensions, enums,
+types, domains, sequences, tables in foreign-key order, functions, indexes,
+triggers, views, rules and policies.
+
+| Option | Default | Description |
+|---|---|---|
+| `--schema-file` | — | Build the catalog from a `.sql` dump |
+| `--dsn`, `--dsn-env` | `PGPROOF_SOURCE_DSN` | Live source instead of a dump |
+| `--format` | `text` | `text` or `json` |
+| `--out`, `-o` | `order.txt` | Output file; use `-` for stdout |
+
+```bash
+pgproof order --schema-file db/schema.sql -o -
+pgproof order --schema-file db/schema.sql --format json -o order.json
+```
+
+Text output marks steps inside a foreign-key cycle with `!` and shows
+dependencies after `<-`.
 
 ## `pgproof audit`
 

@@ -326,6 +326,52 @@ Rules travel in `Catalog.rules` as `RuleCandidate` objects with `kind`,
 like declared constraints. Candidates that are not applied still appear in the
 report for review.
 
+## Creation and insertion order
+
+`core/creation.py` turns a catalog into a dependency-safe list of steps. It does
+not depend on the order of statements in the dump.
+
+1. extensions
+2. enum types
+3. composite and range types
+4. domains
+5. sequences
+6. tables in foreign-key order (`core/graph.py`, iterative Tarjan SCC)
+7. functions and procedures
+8. indexes
+9. triggers
+10. views and materialized views, ordered by view-to-view dependencies
+11. rules
+12. policies
+13. comments and grants
+
+`CreationStep.depends_on` holds the parent table keys, source tables, functions
+or views a step needs. Foreign-key cycles are condensed and flagged with
+`cycle = True`; view cycles are broken in name order and reported as warnings.
+`pgproof order` writes the list as text or JSON, and `load-dump` and `plan`
+embed the same structure.
+
+## Exclusion constraints
+
+`EXCLUDE` constraints are declared constraints, not code-derived candidates.
+The dump loader reads `USING`, every `(column WITH operator)` element and the
+optional `WHERE` predicate from both `CREATE TABLE` and `ALTER TABLE`. The
+verifier turns them into a self-join over `ctid`:
+
+```sql
+SELECT a.ctid FROM "public"."booking" a JOIN "public"."booking" b
+ON a.ctid < b.ctid
+WHERE a."room" = b."room" AND a."during" && b."during" AND (a.active)
+```
+
+The generator does not yet shape rows to avoid overlaps; an exclusion violation
+is reported like any other failed invariant.
+
+View filters are a different case. A `WHERE` inside a view becomes a
+`RuleCandidate` with `kind="filter"` and `scope="aggregate"`. It describes the
+rows the view exposes, not a constraint on the base table, so it is never
+applied as a check and never changes other candidates.
+
 ## Security
 
 - Credentials come from the environment or `--dsn`, never from the report.

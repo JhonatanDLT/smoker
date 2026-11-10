@@ -140,7 +140,7 @@ class Provenance:
 @dataclass
 class RuleCandidate:
     id: str
-    kind: str  # check | derived | condition
+    kind: str  # check | derived | filter
     table: str
     expression: str
     columns: list[str] = field(default_factory=list)
@@ -148,6 +148,7 @@ class RuleCandidate:
     applied: bool = False
     provenance: Provenance | None = None
     note: str | None = None
+    scope: str = "row"  # row | statement | aggregate
 
 
 @dataclass
@@ -157,6 +158,23 @@ class SqlObject:
     name: str | None
     definition: str
     provenance: Provenance
+    depends_on: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ExclusionElement:
+    column: str
+    operator: str
+
+
+@dataclass
+class ExclusionConstraint:
+    name: str
+    elements: list[ExclusionElement] = field(default_factory=list)
+    method: str | None = None
+    predicate: str | None = None
+    definition: str = ""
+    provenance: Provenance | None = None
 
 
 @dataclass
@@ -255,6 +273,7 @@ class Table:
     foreign_keys: list[ForeignKey] = field(default_factory=list)
     uniques: list[UniqueConstraint] = field(default_factory=list)
     checks: list[CheckConstraint] = field(default_factory=list)
+    exclusions: list[ExclusionConstraint] = field(default_factory=list)
     triggers: list[Trigger] = field(default_factory=list)
     estimated_rows: int | None = None
     is_partitioned: bool = False
@@ -353,6 +372,19 @@ class Catalog:
                 )
                 for check in raw.get("checks", [])
             ]
+            exclusions = [
+                ExclusionConstraint(
+                    **{
+                        **exclusion,
+                        "elements": [
+                            ExclusionElement(**element)
+                            for element in exclusion.get("elements", [])
+                        ],
+                        "provenance": _provenance(exclusion.get("provenance")),
+                    }
+                )
+                for exclusion in raw.get("exclusions", [])
+            ]
             triggers = [
                 Trigger(
                     **{
@@ -372,6 +404,7 @@ class Catalog:
                     foreign_keys=foreign_keys,
                     uniques=uniques,
                     checks=checks,
+                    exclusions=exclusions,
                     triggers=triggers,
                     estimated_rows=raw.get("estimated_rows"),
                     is_partitioned=raw.get("is_partitioned", False),
@@ -405,6 +438,7 @@ class Catalog:
                     name=obj.get("name"),
                     definition=obj.get("definition", ""),
                     provenance=_provenance(obj.get("provenance")) or Provenance("dump", ""),
+                    depends_on=list(obj.get("depends_on", [])),
                 )
                 for obj in data.get("objects", [])
             ],
@@ -419,6 +453,7 @@ class Catalog:
                     applied=bool(rule.get("applied", False)),
                     provenance=_provenance(rule.get("provenance")),
                     note=rule.get("note"),
+                    scope=rule.get("scope", "row"),
                 )
                 for rule in data.get("rules", [])
             ],

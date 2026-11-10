@@ -388,6 +388,47 @@ def invariants_from_catalog(catalog: Catalog) -> list[Invariant]:
                 )
             )
 
+        for exclusion in table.exclusions:
+            if not exclusion.elements:
+                invariants.append(
+                    Invariant(
+                        id=_invariant_id("exclusion", table, exclusion.name),
+                        kind=InvariantKind.EXCLUSION,
+                        table=table.key,
+                        description=f"{table.key} exclusion {exclusion.name}",
+                        violation_sql="",
+                        status=InvariantStatus.SKIPPED,
+                        columns=[],
+                        note="could not extract exclusion elements",
+                    )
+                )
+                continue
+            conditions = " AND ".join(
+                f"a.{_c(element.column)} {element.operator} b.{_c(element.column)}"
+                for element in exclusion.elements
+            )
+            predicate = f" AND {exclusion.predicate}" if exclusion.predicate else ""
+            element_text = ", ".join(
+                f"{element.column} WITH {element.operator}"
+                for element in exclusion.elements
+            )
+            invariants.append(
+                Invariant(
+                    id=_invariant_id("exclusion", table, exclusion.name),
+                    kind=InvariantKind.EXCLUSION,
+                    table=table.key,
+                    columns=[element.column for element in exclusion.elements],
+                    description=f"{table.key} exclusion {exclusion.name} ({element_text})",
+                    violation_sql=(
+                        f"SELECT a.ctid FROM {qualified} a JOIN {qualified} b "
+                        f"ON a.ctid < b.ctid WHERE {conditions}{predicate}"
+                    ),
+                    provenance=(
+                        exclusion.provenance.source if exclusion.provenance else None
+                    ),
+                )
+            )
+
         for trigger in table.triggers:
             invariants.append(
                 Invariant(

@@ -4,6 +4,36 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [0.6.0] — 2026-11-10
+
+### Added
+
+- **Dependency-safe creation order** (`pgproof order`):
+  extensions → enums → types → domains → sequences → tables (FK order) →
+  functions → indexes → triggers → views → materialized views → rules →
+  policies → comments/grants.
+- `depends_on` on every step, view-to-view ordering and foreign-key cycle
+  reporting.
+- `creation_order` in `load-dump` and `plan` JSON output.
+- **Exclusion constraints** parsed from `CREATE TABLE` and `ALTER TABLE`,
+  including `USING`, elements and `WHERE` predicates, and verified as declared
+  constraints with a `ctid` self-join.
+- **View filters** extracted as `kind="filter"`, `scope="aggregate"`
+  candidates. They are report-only and never add checks to the base table.
+- `RuleCandidate.scope` (`row` / `aggregate`) and a Scope column in the HTML
+  report.
+- Enum and domain objects stored in `Catalog.objects` so the creation order can
+  list them.
+
+### Fixed
+
+- `CREATE EXTENSION IF NOT EXISTS` no longer captures `IF` as the extension name.
+- Exclusion `WHERE` predicates are qualified with the `a` alias.
+
+### Measured
+
+- 110 tests passing.
+
 ## [0.5.0] — 2026-11-10
 
 ### Added
