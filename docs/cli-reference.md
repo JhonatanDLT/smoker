@@ -24,6 +24,25 @@ Every command accepts `--dsn` or `--dsn-env`.
 the report's `reproduce` field; a DSN passed as a flag would end up in the
 artifact.
 
+### Catalog filters
+
+`--schema`, `--include` and `--exclude` restrict which tables are introspected.
+They apply to `introspect`, `audit`, `profile`, `plan`, `generate`, `verify` and
+`run`, and they also work with a saved `--catalog`.
+
+| Option | Description |
+|---|---|
+| `--schema` | Comma-separated schema names |
+| `--include` | Comma-separated globs matched against `schema.table` or the table name |
+| `--exclude` | Same, but removes matches |
+
+```bash
+pgproof run --schema billing --exclude "*.audit_*" --out proof
+```
+
+Patterns are shell globs. `billing.*` matches every table in `billing`;
+`*_history` matches any table ending in `_history` in any schema.
+
 ### Exit codes
 
 | Code | Meaning |

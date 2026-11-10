@@ -8,10 +8,14 @@ This page exists because trust is built by publishing what you do **not** do.
   primary keys, foreign keys, enum domains, and the `CHECK` constraints that the
   local rule parser understands.
 - Composite foreign keys are supported.
-- Partitioned tables are supported for single-column range, list and hash keys:
-  introspection reads the partition bounds, generation stays inside them, and
-  PostgreSQL routes each row. Sub-partitioning and multi-column keys are not
-  supported yet.
+- Partitioned tables are supported for range, list and hash keys, including
+  multi-column keys and sub-partitioning. Introspection reads the partition
+  tree, generation samples a leaf and stays inside every bound, and PostgreSQL
+  routes each row.
+- Trigger functions are stored once per OID, even when hundreds of triggers
+  share the same function.
+- Schema filters (`--schema`, `--include`, `--exclude`) restrict introspection
+  without touching the database.
 - Deep foreign-key chains are supported: the SCC pass is iterative, so a
   5,000-table chain plans without hitting Python's recursion limit.
 - `TRUNCATE` runs in batches of 100 tables, keeping the lock footprint bounded
@@ -30,6 +34,7 @@ This page exists because trust is built by publishing what you do **not** do.
 | Area | Status | Why |
 |---|---|---|
 | Trigger side effects | `skipped` | We inventory triggers but do not replay them. A trigger that inserts into an audit table will not be simulated. |
+| Stored procedures and rules | not analyzed | Only trigger functions are read, and only their body is stored. `CREATE RULE` (`pg_rewrite`) and event triggers are not scanned. |
 | Exclusion constraints (`EXCLUDE`) | `skipped` | Not generated against; PostgreSQL enforces them at load time. |
 | Cross-table business rules | not enforced | `invoice.total = SUM(lines.amount)` requires a repair pass that v1 does not have. Declare it in the spec and it will be verified, not fixed. |
 | `INSERT` mode with self-references | falls back to `COPY` | A row-by-row insert cannot reference a row that has not been inserted yet. |
@@ -38,7 +43,7 @@ This page exists because trust is built by publishing what you do **not** do.
 | Row-level security policies | ignored | Generation uses a privileged connection. |
 | Domain constraints | partially | The base type is generated; domain `CHECK`s are enforced by PostgreSQL at load time. |
 | `NOT VALID` constraints | verified, flagged | They are enforced on new rows, so we check them and warn that old rows were never validated. |
-| Partitioned tables | **supported** | Single-column range, list and hash keys. Partitions are introspected as metadata, not as separate tables. Sub-partitioning and multi-column keys are not supported. |
+| Partitioned tables | **supported** | Range, list and hash keys, including multi-column keys and sub-partitioning. Partitions are introspected as a tree, not as separate tables. |
 | Generated columns | excluded from writes | The database computes them. |
 | Arrays | empty array | Element type and length are not modelled. |
 | `bytea` | placeholder | Values are not meaningful. |

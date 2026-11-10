@@ -74,7 +74,7 @@ open proof/report.html
 Expected output:
 
 ```
-pgproof 0.3.1 · 10 tables · 2,000 rows · seed 42
+pgproof 0.3.2 · 10 tables · 2,000 rows · seed 42
   generate billing.accounts        200 rows
   generate billing.plans           200 rows
   ...
@@ -105,6 +105,9 @@ Common options:
 --spec                 YAML file with application-level rules and repairs
 --profile              profile JSON from `pgproof profile`
 --out                  output directory (default: proof)
+--schema               comma-separated schemas to introspect
+--include              comma-separated globs to include
+--exclude              comma-separated globs to exclude
 --format               json,html,junit (default: all three)
 --fail-on              never, error, fail (default: fail)
 --max-passes           repair fixed-point limit (default: 3)
@@ -134,7 +137,7 @@ Three public schemas exercise different features:
 | `examples/ecommerce` | Unique `varchar` truncation, ranges, nullable ordering |
 | `examples/multi-tenant-crm` | Composite keys, scope-aware tenant foreign keys |
 | `examples/analytics` | JSONB, bounded decimals, timestamp ordering |
-| `examples/partitioned-events` | Range, list and hash partition routing |
+| `examples/partitioned-events` | Range, list, hash, multi-column and sub-partitioned routing |
 
 ```bash
 make fixtures   # creates one database per fixture and writes proof/<fixture>/

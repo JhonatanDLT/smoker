@@ -150,6 +150,15 @@ class Trigger:
     function: str
     definition: str
     body: str | None = None
+    function_oid: int | None = None
+
+
+@dataclass
+class Function:
+    oid: int
+    schema: str
+    name: str
+    body: str
 
 
 @dataclass
@@ -157,12 +166,39 @@ class Partition:
     schema: str
     name: str
     strategy: str  # range | list | hash | default
-    lower: Any = None
-    upper: Any = None
-    values: list[Any] = field(default_factory=list)
+    columns: list[str] = field(default_factory=list)
+    lower: list[Any] | None = None
+    upper: list[Any] | None = None
+    values: list[list[Any]] = field(default_factory=list)
     modulus: int | None = None
     remainder: int | None = None
     estimated_rows: int = 0
+    children: list[Partition] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Partition:
+        lower = data.get("lower")
+        upper = data.get("upper")
+        values = data.get("values") or []
+        if lower is not None and not isinstance(lower, list):
+            lower = [lower]
+        if upper is not None and not isinstance(upper, list):
+            upper = [upper]
+        if values and not isinstance(values[0], list):
+            values = [[value] for value in values]
+        return cls(
+            schema=data.get("schema", ""),
+            name=data.get("name", ""),
+            strategy=data.get("strategy", "default"),
+            columns=list(data.get("columns", [])),
+            lower=lower,
+            upper=upper,
+            values=values,
+            modulus=data.get("modulus"),
+            remainder=data.get("remainder"),
+            estimated_rows=int(data.get("estimated_rows", 0)),
+            children=[cls.from_dict(child) for child in data.get("children", [])],
+        )
 
 
 @dataclass
@@ -204,12 +240,21 @@ class Catalog:
     server_version: str
     tables: list[Table] = field(default_factory=list)
     schemas: list[str] = field(default_factory=list)
+    functions: list[Function] = field(default_factory=list)
 
     def table(self, key: str) -> Table:
         for table in self.tables:
             if table.key == key:
                 return table
         raise KeyError(f"unknown table {key!r}")
+
+    def function(self, oid: int | None) -> Function | None:
+        if oid is None:
+            return None
+        for function in self.functions:
+            if function.oid == oid:
+                return function
+        return None
 
     @property
     def table_keys(self) -> list[str]:
@@ -227,7 +272,7 @@ class Catalog:
             uniques = [UniqueConstraint(**u) for u in raw.get("uniques", [])]
             checks = [CheckConstraint(**c) for c in raw.get("checks", [])]
             triggers = [Trigger(**t) for t in raw.get("triggers", [])]
-            partitions = [Partition(**p) for p in raw.get("partitions", [])]
+            partitions = [Partition.from_dict(p) for p in raw.get("partitions", [])]
             tables.append(
                 Table(
                     schema=raw["schema"],
@@ -253,6 +298,7 @@ class Catalog:
             server_version=data.get("server_version", ""),
             tables=tables,
             schemas=data.get("schemas", []),
+            functions=[Function(**function) for function in data.get("functions", [])],
         )
 
 
@@ -299,20 +345,56 @@ def _restore_scalar(value: Any, kind: DataKind) -> Any:
 
 
 def _restore_partition_values(table: Table) -> None:
-    if len(table.partition_key) != 1:
-        return
-    try:
-        column = table.column(table.partition_key[0])
-    except KeyError:
-        return
-    for partition in table.partitions:
-        if partition.strategy == "range":
-            partition.lower = _restore_scalar(partition.lower, column.data_kind)
-            partition.upper = _restore_scalar(partition.upper, column.data_kind)
-        elif partition.strategy == "list":
-            partition.values = [
-                _restore_scalar(value, column.data_kind) for value in partition.values
-            ]
+    def restore(nodes: list[Partition]) -> None:
+        for partition in nodes:
+            columns: list[Column | None] = []
+            for name in partition.columns:
+                try:
+                    columns.append(table.column(name))
+                except KeyError:
+                    columns.append(None)
+
+            def value_at(value: Any, index: int, bound: list[Column | None] = columns) -> Any:
+                column = bound[index] if index < len(bound) else None
+                return _restore_scalar(
+                    value, column.data_kind if column else DataKind.OTHER
+                )
+
+            if partition.strategy == "range":
+                if partition.lower is not None:
+                    partition.lower = [
+                        value_at(value, index)
+                        for index, value in enumerate(partition.lower)
+                    ]
+                if partition.upper is not None:
+                    partition.upper = [
+                        value_at(value, index)
+                        for index, value in enumerate(partition.upper)
+                    ]
+            elif partition.strategy == "list":
+                partition.values = [
+                    [value_at(value, index) for index, value in enumerate(row)]
+                    for row in partition.values
+                ]
+            restore(partition.children)
+
+    restore(table.partitions)
+
+
+def all_partition_columns(table: Table) -> list[str]:
+    columns: list[str] = []
+    if table.partition_key:
+        columns.extend(table.partition_key)
+
+    def walk(nodes: list[Partition]) -> None:
+        for node in nodes:
+            for name in node.columns:
+                if name not in columns:
+                    columns.append(name)
+            walk(node.children)
+
+    walk(table.partitions)
+    return columns
 
 
 def quote_ident(name: str) -> str:

@@ -4,6 +4,27 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [0.3.2] — 2026-11-10
+
+### Added
+
+- **Schema filters.** `--schema`, `--include` and `--exclude` restrict
+  introspection on every command that reads a catalog.
+- **Multi-column partition keys.** Range and list bounds are parsed as tuples
+  and generation stays inside the lexicographic bounds.
+- **Sub-partitioning.** The partition tree is introspected recursively; the
+  generator flattens it into leaf paths and satisfies every level's bounds.
+- **Trigger function deduplication.** Function bodies are stored once per OID;
+  triggers reference them by `function_oid`.
+- `pgproof audit` and `pgproof profile` honor the catalog filters.
+
+### Measured
+
+- 500 triggers sharing one function produce one function body.
+- A sub-partitioned table routes rows by month and level; a multi-column range
+  splits tenants 1–99 and 100–199.
+- 82 tests passing.
+
 ## [0.3.1] — 2026-11-10
 
 ### Added

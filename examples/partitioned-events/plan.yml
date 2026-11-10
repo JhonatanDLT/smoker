@@ -16,3 +16,15 @@ invariants:
     description: audit kind is one of the partitioned values
     sql: |
       SELECT id FROM part.audit WHERE kind NOT IN ('login', 'purchase')
+
+  - id: tenant_events_amount_non_negative
+    table: part.tenant_events
+    description: tenant event amounts are never negative
+    sql: |
+      SELECT id FROM part.tenant_events WHERE amount < 0
+
+  - id: logs_level_is_known
+    table: part.logs
+    description: log level is one of the sub-partitioned values
+    sql: |
+      SELECT id FROM part.logs WHERE level NOT IN ('info', 'error')

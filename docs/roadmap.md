@@ -31,8 +31,9 @@ The order is deliberate: each phase is funded by the previous one.
 - Partitioned table routing (range, list, hash). **Delivered in 0.3.0.**
 - `TABLESAMPLE` and date histograms for profiles. **Delivered in 0.3.1.**
 - Column correlations. *(pending)*
-- Sub-partitioning and multi-column partition keys. *(pending)*
-- Schema include/exclude filters. *(pending)*
+- Sub-partitioning and multi-column partition keys. **Delivered in 0.3.2.**
+- Schema include/exclude filters. **Delivered in 0.3.2.**
+- Function-body deduplication by OID. **Delivered in 0.3.2.**
 - Parallel verification and `TRUNCATE` batching. *(batching delivered in 0.2.1)*
 - More rule shapes: `BETWEEN`, `OR`, `IS NULL` implications, `LIKE` patterns.
   *(partial)*

@@ -1,7 +1,7 @@
 # Status
 
 **Date:** 2026-11-02
-**Version:** 0.3.1
+**Version:** 0.3.2
 **State:** working v1 plus CI output, repair loop and distribution-aware
 generation. Tested end to end against PostgreSQL 16.
 
@@ -17,6 +17,9 @@ generation. Tested end to end against PostgreSQL 16.
 | Deterministic generation (seed per table) | ✅ |
 | Pre-allocated keys (foreign-key cycles) | ✅ |
 | Partitioned tables (range, list and hash, single-column keys) | ✅ |
+| Multi-column partition keys and sub-partitioning | ✅ |
+| Schema include/exclude filters (`--schema`, `--include`, `--exclude`) | ✅ |
+| Trigger functions deduplicated by OID | ✅ |
 | Deep foreign-key chains (iterative SCC, 5,000 tables tested) | ✅ |
 | Batched `TRUNCATE` (100 tables per statement) | ✅ |
 | Local rules: ranges, `IN`, `a = b * c`, `ends_at > starts_at` | ✅ |
@@ -47,7 +50,7 @@ generation. Tested end to end against PostgreSQL 16.
 | `ecommerce` | 92 | PASS |
 | `multi-tenant-crm` | 79 | PASS |
 | `analytics` | 74 | PASS |
-| `partitioned-events` | 17 | PASS |
+| `partitioned-events` | 29 | PASS |
 
 ## Measured
 
@@ -56,13 +59,16 @@ generation. Tested end to end against PostgreSQL 16.
 - 1,200 tables × 1,000 rows (1.2M rows, 9,599 invariants): **28 s**, 173 MB.
 - 5,000-table reverse-ordered FK chain: plan succeeds with the iterative SCC.
 - Partitioned fixture: 60 rows routed across 12 range partitions and 4 hash
-  partitions; introspection reports 3 parents, not 19 relations.
+  partitions; multi-column ranges split tenants 1–99 / 100–199; a
+  sub-partitioned table routes rows by month and level.
+- Introspection reports 5 parents, not 25 relations.
+- 500 triggers sharing one function produce **one** function body, not 500.
 - Profile: a 60k-row table sampled with `TABLESAMPLE SYSTEM (0.83%)` (500
   rows), producing a 19-bucket date histogram; generation with that profile
   passed.
 - Repair: 50 invoices repaired in one pass, residual 0, PASS.
 - Distribution: source skew 80/20 reproduced at **81/19** in the target, PASS.
-- **71 tests passing** (unit, integration and architecture guards).
+- **82 tests passing** (unit, integration and architecture guards).
 - Same seed produces the same dataset hash every run.
 
 ## Documentation
@@ -115,14 +121,11 @@ cli ──► application ──► core (domain + ports)
 
 ## Known gaps
 
-- Sub-partitioning and multi-column partition keys are not supported yet.
 - Trigger side effects are inventoried but not replayed.
-- Stored procedures are not analyzed; only trigger functions are inventoried.
+- Stored procedures, `CREATE RULE` and event triggers are not analyzed.
 - Exclusion constraints are not generated against.
 - Distributions are per column; correlations are not modelled.
-- Date histograms are not used.
-- No schema include/exclude filter: all non-system schemas are introspected.
-- Verification is sequential (one query per invariant).
+- No parallel verification yet.
 - Cross-table rules need an explicit `repair:` declaration.
 - SQL Server, MySQL and static code analysis are roadmap items.
 
@@ -131,10 +134,10 @@ See [`docs/limitations.md`](docs/limitations.md).
 ## Next tasks
 
 1. Column correlations (country ↔ city, price ↔ category).
-2. Sub-partitioning and multi-column partition keys.
-3. Schema include/exclude filters and function-body deduplication by OID.
-4. Parallel verification.
-5. Publish to PyPI and the GitHub Marketplace; first design-partner pilot.
+2. Parallel verification.
+3. Function and rule analysis (static code analysis, phase 3).
+4. Publish to PyPI and the GitHub Marketplace.
+5. First design-partner pilot.
 
 ## Decision rules
 

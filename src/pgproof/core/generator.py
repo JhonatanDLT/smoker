@@ -19,7 +19,7 @@ from typing import Any
 
 from .distribution import build_distribution, coerce_value, numeric_scale
 from .invariants import LocalRules, infer_semantic, parse_local_rules
-from .ir import Catalog, Column, DataKind, Table
+from .ir import Catalog, Column, DataKind, Table, all_partition_columns
 from .planner import Plan
 from .profile import Profile
 
@@ -70,6 +70,50 @@ def _freeze(value: Any) -> Any:
     if isinstance(value, (list, dict, set)):
         return repr(value)
     return value
+
+
+def _leaf_paths(nodes: list[Any], path: list[Any] | None = None) -> Iterator[list[Any]]:
+    current = list(path or [])
+    for node in nodes:
+        branch = current + [node]
+        if node.children:
+            yield from _leaf_paths(node.children, branch)
+        else:
+            yield branch
+
+
+def _tuple_in_range(values: list[Any], lower: list[Any], upper: list[Any]) -> bool:
+    def lower_key(value: Any) -> tuple:
+        return (0,) if value is None else (1, value)
+
+    def upper_key(value: Any) -> tuple:
+        return (2,) if value is None else (1, value)
+
+    padded_lower = list(lower) + [None] * (len(values) - len(lower))
+    padded_upper = list(upper) + [None] * (len(values) - len(upper))
+    try:
+        return tuple(lower_key(value) for value in values) >= tuple(
+            lower_key(value) for value in padded_lower
+        ) and tuple(upper_key(value) for value in values) < tuple(
+            upper_key(value) for value in padded_upper
+        )
+    except TypeError:
+        return True
+
+
+def _satisfies(path: list[Any], values: dict[str, Any]) -> bool:
+    for node in path:
+        if node.strategy == "range":
+            current = [values.get(name) for name in node.columns]
+            if any(value is None for value in current):
+                return False
+            if not _tuple_in_range(current, node.lower or [], node.upper or []):
+                return False
+        elif node.strategy == "list":
+            current = tuple(values.get(name) for name in node.columns)
+            if not any(tuple(row) == current for row in node.values):
+                return False
+    return True
 
 
 @dataclass
@@ -209,17 +253,9 @@ class Generator:
         values: dict[str, Any] = {}
         rng = self.rng_for(f"{table.key}:rows")
 
-        partition_values: dict[str, Any] = {}
-        if (
-            table.is_partitioned
-            and len(table.partition_key) == 1
-            and not table.has_sub_partitions
-        ):
-            partition_column = table.partition_key[0]
-            partition_value = self._partition_value(table, index, rng)
-            if partition_value is not None:
-                partition_values[partition_column] = partition_value
-                values[partition_column] = partition_value
+        partition_values = self._partition_values(table, index, rng)
+        for name, value in partition_values.items():
+            values[name] = value
 
         primary_key = tuple(table.primary_key)
         pk_pool = self.pools.get((table.key, primary_key)) if primary_key else None
@@ -338,56 +374,106 @@ class Generator:
             index_key = (table.key, key_columns, scope_columns)
             self.scope_index.setdefault(index_key, []).append(entry)
 
-    def _partition_value(
+    def _partition_values(
         self, table: Table, index: int, rng: random.Random
-    ) -> Any:
-        if not table.is_partitioned or len(table.partition_key) != 1:
-            return None
-        if table.has_sub_partitions:
-            return None
-        strategy = table.partition_strategy
-        if strategy not in {"r", "l"}:
-            return None
+    ) -> dict[str, Any]:
+        if not table.is_partitioned or not table.partitions:
+            return {}
 
-        column = table.column(table.partition_key[0])
-        key_only = set(table.primary_key) == set(table.partition_key)
+        paths = [
+            path
+            for path in _leaf_paths(table.partitions)
+            if any(node.strategy in {"range", "list"} for node in path)
+        ]
+        if not paths:
+            return {}
 
-        if strategy == "r":
-            partitions = [p for p in table.partitions if p.strategy == "range"]
-            if not partitions:
-                return None
-            if key_only:
-                return self._sequence_partition_value(table, column, partitions)
-            chosen = rng.choices(
-                partitions,
-                weights=[max(partition.estimated_rows, 1) for partition in partitions],
-                k=1,
-            )[0]
-            return self._sample_range(column, chosen.lower, chosen.upper, rng)
+        all_columns = all_partition_columns(table)
+        key_only = set(table.primary_key) == set(all_columns)
 
-        if strategy == "l":
-            partitions = [
-                p for p in table.partitions if p.strategy == "list" and p.values
+        if key_only and len(all_columns) == 1:
+            return self._sequence_partition_values(table, paths, all_columns[0])
+
+        chosen = rng.choices(
+            paths,
+            weights=[max(path[-1].estimated_rows, 1) for path in paths],
+            k=1,
+        )[0]
+
+        for _ in range(30):
+            values: dict[str, Any] = {}
+            for node in chosen:
+                if node.strategy == "range" and node.columns:
+                    sampled = self._sample_range_tuple(table, node, rng)
+                elif node.strategy == "list" and node.values:
+                    sampled = list(rng.choice(node.values))
+                else:
+                    continue
+                for name, value in zip(node.columns, sampled):
+                    values[name] = value
+            if _satisfies(chosen, values):
+                return values
+
+        fallback: dict[str, Any] = {}
+        for node in chosen:
+            if node.strategy == "range" and node.lower:
+                for name, value in zip(node.columns, node.lower):
+                    if value is not None:
+                        fallback[name] = value
+            elif node.strategy == "list" and node.values:
+                for name, value in zip(node.columns, node.values[0]):
+                    fallback[name] = value
+        return fallback
+
+    def _sequence_partition_values(
+        self, table: Table, paths: list[list[Any]], column_name: str
+    ) -> dict[str, Any]:
+        counter = self._partition_counters.get(table.key, 0)
+        self._partition_counters[table.key] = counter + 1
+        remaining = counter
+        column = table.column(column_name)
+        for path in paths:
+            node = next(
+                (item for item in path if item.strategy in {"range", "list"} and item.columns),
+                None,
+            )
+            if node is None:
+                continue
+            capacity = self._capacity(column, node)
+            if remaining < capacity:
+                if node.strategy == "list":
+                    return {column_name: node.values[remaining][0]}
+                lower = node.lower[0] if node.lower else None
+                upper = node.upper[0] if node.upper else None
+                return {
+                    column_name: self._nth_range_value(column, lower, upper, remaining)
+                }
+            remaining -= capacity
+        raise GenerationError(
+            f"{table.key}: not enough distinct partition-key values for "
+            "a partition-key-only primary key"
+        )
+
+    def _capacity(self, column: Column, node: Any) -> int:
+        if node.strategy == "list":
+            return len(node.values)
+        lower = node.lower[0] if node.lower else None
+        upper = node.upper[0] if node.upper else None
+        return self._range_capacity(column, lower, upper)
+
+    def _sample_range_tuple(
+        self, table: Table, node: Any, rng: random.Random
+    ) -> list[Any]:
+        lower = list(node.lower or [None] * len(node.columns))
+        upper = list(node.upper or [None] * len(node.columns))
+        for _ in range(20):
+            values = [
+                self._sample_range(table.column(name), low, high, rng)
+                for name, low, high in zip(node.columns, lower, upper)
             ]
-            if not partitions:
-                return None
-            if key_only:
-                flat = [value for partition in partitions for value in partition.values]
-                if index >= len(flat):
-                    raise GenerationError(
-                        f"{table.key}: only {len(flat)} distinct values across list "
-                        f"partitions; cannot generate row {index + 1} with a "
-                        "partition-key-only primary key"
-                    )
-                return flat[index]
-            chosen = rng.choices(
-                partitions,
-                weights=[max(partition.estimated_rows, 1) for partition in partitions],
-                k=1,
-            )[0]
-            return rng.choice(chosen.values)
-
-        return None
+            if _tuple_in_range(values, lower, upper):
+                return values
+        return lower
 
     def _sample_range(
         self,
@@ -442,24 +528,6 @@ class Generator:
             return value
 
         return None
-
-    def _sequence_partition_value(
-        self, table: Table, column: Column, partitions: list[Any]
-    ) -> Any:
-        counter = self._partition_counters.get(table.key, 0)
-        self._partition_counters[table.key] = counter + 1
-        remaining = counter
-        for partition in partitions:
-            capacity = self._range_capacity(column, partition.lower, partition.upper)
-            if remaining < capacity:
-                return self._nth_range_value(
-                    column, partition.lower, partition.upper, remaining
-                )
-            remaining -= capacity
-        raise GenerationError(
-            f"{table.key}: not enough distinct partition-key values for "
-            "a partition-key-only primary key"
-        )
 
     def _range_capacity(self, column: Column, lower: Any, upper: Any) -> int:
         kind = column.data_kind
@@ -850,16 +918,17 @@ class Generator:
                 seen.add(signature)
                 continue
 
+            partition_columns = set(all_partition_columns(table))
             candidates = [
                 name
                 for name in key_columns
-                if isinstance(values.get(name), str) and name not in table.partition_key
+                if isinstance(values.get(name), str) and name not in partition_columns
             ]
             if not candidates:
                 candidates = [
                     name
                     for name in key_columns
-                    if name not in table.partition_key
+                    if name not in partition_columns
                     and not any(name in fk.child_columns for fk in table.foreign_keys)
                 ]
             if not candidates:

@@ -106,13 +106,22 @@ exists.
 | Sequences | `pg_get_serial_sequence`, `pg_sequence` |
 
 `pg_get_constraintdef` normalizes predicates, for example:
-
 ```
 CHECK (amount = (quantity::numeric * unit_price))
 ```
 
 The extractor strips `CHECK (...)` and the rule parser tolerates casts,
 parentheses and `NOT VALID`.
+
+### Filters and function deduplication
+
+`--schema`, `--include` and `--exclude` are applied after introspection by
+`core/filters.py`. They use shell globs against `schema.table` and the bare
+table name, and they also work with a saved catalog.
+
+Trigger function bodies are stored once per OID in `Catalog.functions`. Each
+`Trigger` keeps a `function_oid`, so 500 triggers that share one function
+produce one body, not 500.
 
 ## Generation
 
@@ -159,24 +168,22 @@ deliberately ignored.
 
 ### Partitioned tables
 
-Introspection excludes child partitions from the table list and stores them as
-metadata on the parent. `Partition` carries the bounds:
+Introspection excludes child partitions from the table list and stores them as a
+tree on the parent. `Partition` carries the bounds:
 
-- **range**: `lower` / `upper`
-- **list**: `values`
+- **range**: `lower` / `upper`, as lists for multi-column keys
+- **list**: `values`, a list of tuples
 - **hash**: `modulus` / `remainder`
+- **sub-partitioning**: `children`
 
-The generator samples the partition key inside the union of bounds:
+The generator flattens the tree into leaf paths, picks a leaf weighted by
+estimated rows, and samples each level's key inside its bounds. A tuple is
+checked against every range and list constraint on the path before it is
+accepted; otherwise it is resampled.
 
-- range: pick a partition weighted by estimated rows, then sample in
-  `[lower, upper)`
-- list: pick a partition, then one of its values
-- hash: no restriction; PostgreSQL routes by hash
-
-When the partition key is the whole primary key, a per-table counter guarantees
-uniqueness. Composite primary keys use the other key columns for uniqueness.
-Sub-partitioning and multi-column partition keys are reported as warnings and
-generated without bounds.
+When the partition key is the whole primary key and it has a single column, a
+per-table counter guarantees uniqueness. Multi-column and sub-partitioned
+key-only primary keys are warned about in the plan.
 
 ### Determinism
 

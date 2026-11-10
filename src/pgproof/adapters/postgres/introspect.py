@@ -19,6 +19,7 @@ from ...core.ir import (
     Column,
     DataKind,
     ForeignKey,
+    Function,
     Partition,
     Table,
     Trigger,
@@ -103,8 +104,8 @@ SELECT n.nspname AS schema,
        t.tgname AS name,
        t.tgtype::int AS tgtype,
        p.proname AS function_name,
-       pg_get_triggerdef(t.oid, true) AS definition,
-       pg_get_functiondef(p.oid) AS body
+       p.oid::bigint AS function_oid,
+       pg_get_triggerdef(t.oid, true) AS definition
 FROM pg_trigger t
 JOIN pg_class c ON c.oid = t.tgrelid
 JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -113,6 +114,19 @@ WHERE NOT t.tgisinternal
   AND n.nspname NOT IN ('pg_catalog', 'information_schema')
   AND n.nspname NOT LIKE 'pg_toast%%'
 ORDER BY n.nspname, c.relname, t.tgname
+"""
+
+_FUNCTIONS_SQL = """
+SELECT p.oid::bigint AS oid,
+       n.nspname AS schema,
+       p.proname AS name,
+       pg_get_functiondef(p.oid) AS body
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE p.oid IN (
+    SELECT tgfoid FROM pg_trigger WHERE NOT tgisinternal
+)
+ORDER BY p.oid
 """
 
 _PARTITIONED_SQL = """
@@ -293,7 +307,15 @@ def introspect(conn: psycopg.Connection) -> Catalog:
     with conn.cursor() as cur:
         cur.execute(_TRIGGERS_SQL)
         for row in cur.fetchall():
-            schema, table_name, name, tgtype, function_name, definition, body = row
+            (
+                schema,
+                table_name,
+                name,
+                tgtype,
+                function_name,
+                function_oid,
+                definition,
+            ) = row
             table = tables.get(f"{schema}.{table_name}")
             if table is None:
                 continue
@@ -304,6 +326,19 @@ def introspect(conn: psycopg.Connection) -> Catalog:
                     events=_trigger_events(tgtype),
                     function=function_name,
                     definition=definition,
+                    function_oid=int(function_oid),
+                )
+            )
+
+    functions: list[Function] = []
+    with conn.cursor() as cur:
+        cur.execute(_FUNCTIONS_SQL)
+        for oid, schema, name, body in cur.fetchall():
+            functions.append(
+                Function(
+                    oid=int(oid),
+                    schema=schema,
+                    name=name,
                     body=(body or "")[:20000],
                 )
             )
@@ -315,6 +350,7 @@ def introspect(conn: psycopg.Connection) -> Catalog:
         server_version=version,
         tables=sorted(tables.values(), key=lambda table: table.key),
         schemas=sorted({table.schema for table in tables.values()}),
+        functions=functions,
     )
 
 
@@ -353,7 +389,9 @@ def _attach_partitions(conn: psycopg.Connection, tables: dict[str, Table]) -> No
         if table is None:
             continue
         table.is_partitioned = True
-        table.partition_strategy = strategy
+        table.partition_strategy = {"r": "range", "l": "list", "h": "hash"}.get(
+            strategy, strategy
+        )
         table.partition_key = key_columns
 
     if not metadata:
@@ -361,33 +399,65 @@ def _attach_partitions(conn: psycopg.Connection, tables: dict[str, Table]) -> No
 
     with conn.cursor() as cur:
         cur.execute(_PARTITIONS_SQL)
-        for row in cur.fetchall():
-            (
-                parent_schema,
-                parent_table,
-                child_schema,
-                child_table,
-                child_kind,
-                estimated_rows,
-                bound,
-            ) = row
-            table = tables.get(f"{parent_schema}.{parent_table}")
-            if table is None:
-                continue
-            column = (
-                table.column(table.partition_key[0])
-                if len(table.partition_key) == 1
-                else None
-            )
-            partition = parse_partition_bound(bound or "", column)
-            if partition is None:
-                continue
-            partition.schema = child_schema
-            partition.name = child_table
-            partition.estimated_rows = max(0, int(estimated_rows or 0))
-            table.partitions.append(partition)
-            if child_kind == "p":
-                table.has_sub_partitions = True
+        relations = cur.fetchall()
+
+    parent_of = {
+        f"{child_schema}.{child_table}": f"{parent_schema}.{parent_table}"
+        for parent_schema, parent_table, child_schema, child_table, *_ in relations
+    }
+
+    def root_of(key: str) -> str | None:
+        seen: set[str] = set()
+        current = key
+        while current not in tables:
+            if current in seen or current not in parent_of:
+                return None
+            seen.add(current)
+            current = parent_of[current]
+        return current
+
+    nodes: dict[str, Partition] = {}
+    for row in relations:
+        (
+            parent_schema,
+            parent_table,
+            child_schema,
+            child_table,
+            _child_kind,
+            estimated_rows,
+            bound,
+        ) = row
+        parent_key = f"{parent_schema}.{parent_table}"
+        child_key = f"{child_schema}.{child_table}"
+        _strategy, key_columns = metadata.get(parent_key, ("", []))
+        root = root_of(parent_key)
+        columns: list[Column | None] = []
+        if root:
+            root_table = tables[root]
+            for name in key_columns:
+                try:
+                    columns.append(root_table.column(name))
+                except KeyError:
+                    columns.append(None)
+        partition = parse_partition_bound(bound or "", columns)
+        if partition is None:
+            continue
+        partition.schema = child_schema
+        partition.name = child_table
+        partition.columns = key_columns
+        partition.estimated_rows = max(0, int(estimated_rows or 0))
+        nodes[child_key] = partition
+        if root and child_key in metadata:
+            tables[root].has_sub_partitions = True
+
+    for child_key, partition in nodes.items():
+        parent_key = parent_of.get(child_key)
+        if parent_key is None:
+            continue
+        if parent_key in tables:
+            tables[parent_key].partitions.append(partition)
+        elif parent_key in nodes:
+            nodes[parent_key].children.append(partition)
 
 
 _RANGE_BOUND = re.compile(r"FOR VALUES FROM \((.*?)\) TO \((.*?)\)$", re.DOTALL)
@@ -398,30 +468,63 @@ _HASH_BOUND = re.compile(
 _CAST = re.compile(r"^(.*?)::[\w\s\[\]\.\"']+$", re.DOTALL)
 
 
-def parse_partition_bound(bound: str, column: Column | None) -> Partition | None:
+def parse_partition_bound(
+    bound: str, columns: list[Column | None] | None
+) -> Partition | None:
     text = " ".join(bound.split())
     if not text:
         return None
+    column_names = [column.name for column in (columns or []) if column is not None]
     if text.upper() == "DEFAULT":
-        return Partition(schema="", name="", strategy="default")
+        return Partition(schema="", name="", strategy="default", columns=column_names)
 
     match = _RANGE_BOUND.search(text)
     if match:
+        lows = _split_top_level(match.group(1))
+        highs = _split_top_level(match.group(2))
         return Partition(
             schema="",
             name="",
             strategy="range",
-            lower=_parse_literal(match.group(1), column),
-            upper=_parse_literal(match.group(2), column),
+            columns=column_names,
+            lower=[
+                _parse_literal(value, _column_at(columns, index))
+                for index, value in enumerate(lows)
+            ],
+            upper=[
+                _parse_literal(value, _column_at(columns, index))
+                for index, value in enumerate(highs)
+            ],
         )
 
     match = _LIST_BOUND.search(text)
     if match:
-        values = [
-            _parse_literal(part, column)
-            for part in _split_top_level(match.group(1))
-        ]
-        return Partition(schema="", name="", strategy="list", values=values)
+        inside = match.group(1).strip()
+        if inside.startswith("("):
+            values = []
+            for raw in _split_top_level(inside):
+                raw = raw.strip()
+                if raw.startswith("(") and raw.endswith(")"):
+                    raw = raw[1:-1]
+                parts = _split_top_level(raw)
+                values.append(
+                    [
+                        _parse_literal(value, _column_at(columns, index))
+                        for index, value in enumerate(parts)
+                    ]
+                )
+        else:
+            values = [
+                [_parse_literal(value, _column_at(columns, 0))]
+                for value in _split_top_level(inside)
+            ]
+        return Partition(
+            schema="",
+            name="",
+            strategy="list",
+            columns=column_names,
+            values=values,
+        )
 
     match = _HASH_BOUND.search(text)
     if match:
@@ -429,10 +532,17 @@ def parse_partition_bound(bound: str, column: Column | None) -> Partition | None
             schema="",
             name="",
             strategy="hash",
+            columns=column_names,
             modulus=int(match.group(1)),
             remainder=int(match.group(2)),
         )
     return None
+
+
+def _column_at(columns: list[Column | None] | None, index: int) -> Column | None:
+    if not columns or index >= len(columns):
+        return None
+    return columns[index]
 
 
 def _split_top_level(text: str) -> list[str]:

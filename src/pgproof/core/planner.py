@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .graph import generation_order
-from .ir import Catalog
+from .ir import Catalog, all_partition_columns
 
 
 class PlanError(RuntimeError):
@@ -76,16 +76,6 @@ def build_plan(
                     "rows cannot be referenced by foreign keys"
                 )
         if table.is_partitioned:
-            if table.has_sub_partitions:
-                warnings.append(
-                    f"{key}: sub-partitioning is not supported; "
-                    "partition routing may fail"
-                )
-            if len(table.partition_key) != 1:
-                warnings.append(
-                    f"{key}: multi-column partition keys are not supported; "
-                    "values may fall outside the partitions"
-                )
             if not any(
                 partition.strategy in {"range", "list"}
                 for partition in table.partitions
@@ -93,6 +83,12 @@ def build_plan(
                 warnings.append(
                     f"{key}: no range or list partitions found; "
                     "the partition key is generated without bounds"
+                )
+            all_columns = all_partition_columns(table)
+            if set(table.primary_key) == set(all_columns) and len(all_columns) > 1:
+                warnings.append(
+                    f"{key}: partition-key-only primary key with multiple columns; "
+                    "uniqueness is not guaranteed"
                 )
 
     return Plan(
