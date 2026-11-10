@@ -1,7 +1,7 @@
 # Status
 
 **Date:** 2026-11-02
-**Version:** 0.3.0
+**Version:** 0.3.1
 **State:** working v1 plus CI output, repair loop and distribution-aware
 generation. Tested end to end against PostgreSQL 16.
 
@@ -32,6 +32,7 @@ generation. Tested end to end against PostgreSQL 16.
 | **Schema readiness audit** (`pgproof audit`) | ✅ |
 | **Repair loop** with fixed-point limit and residual reporting | ✅ |
 | **Distribution profiling** (`pgproof profile`) and profile-aware generation | ✅ |
+| **TABLESAMPLE** sampling and date/timestamp histograms | ✅ |
 | Dataset SHA-256 (recomputed after repairs) | ✅ |
 | CLI: `introspect`, `profile`, `plan`, `generate`, `verify`, `run` | ✅ |
 | Clean architecture: ports, use cases, adapters | ✅ |
@@ -56,9 +57,12 @@ generation. Tested end to end against PostgreSQL 16.
 - 5,000-table reverse-ordered FK chain: plan succeeds with the iterative SCC.
 - Partitioned fixture: 60 rows routed across 12 range partitions and 4 hash
   partitions; introspection reports 3 parents, not 19 relations.
+- Profile: a 60k-row table sampled with `TABLESAMPLE SYSTEM (0.83%)` (500
+  rows), producing a 19-bucket date histogram; generation with that profile
+  passed.
 - Repair: 50 invoices repaired in one pass, residual 0, PASS.
 - Distribution: source skew 80/20 reproduced at **81/19** in the target, PASS.
-- **68 tests passing** (unit, integration and architecture guards).
+- **71 tests passing** (unit, integration and architecture guards).
 - Same seed produces the same dataset hash every run.
 
 ## Documentation
@@ -126,10 +130,10 @@ See [`docs/limitations.md`](docs/limitations.md).
 
 ## Next tasks
 
-1. `TABLESAMPLE` and date histograms for profiles.
-2. Column correlations (country ↔ city, price ↔ category).
-3. Sub-partitioning and multi-column partition keys.
-4. Schema include/exclude filters and function-body deduplication by OID.
+1. Column correlations (country ↔ city, price ↔ category).
+2. Sub-partitioning and multi-column partition keys.
+3. Schema include/exclude filters and function-body deduplication by OID.
+4. Parallel verification.
 5. Publish to PyPI and the GitHub Marketplace; first design-partner pilot.
 
 ## Decision rules

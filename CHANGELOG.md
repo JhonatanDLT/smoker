@@ -4,6 +4,24 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [0.3.1] — 2026-11-10
+
+### Added
+
+- **`TABLESAMPLE` sampling.** Tables above 50k rows are sampled with
+  `TABLESAMPLE SYSTEM` and `REPEATABLE(seed)`; `BERNOULLI` is available with
+  `--sample-method bernoulli`. Below the threshold, and on partitioned parents,
+  `LIMIT` is used.
+- **Date, timestamp and time histograms.** Buckets are computed on a numeric
+  axis and converted back during generation (`bucket_kind` in the profile).
+- `--sample-method` and `--sample-seed` on `pgproof profile`.
+- `sample_method`, `sample_pct` and `bucket_kind` in the profile JSON.
+
+### Measured
+
+- 60k-row table, 500-row `SYSTEM` sample (0.83% of blocks), 19 date buckets;
+  generation with that profile passed.
+
 ## [0.3.0] — 2026-11-04
 
 ### Added

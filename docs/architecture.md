@@ -187,8 +187,14 @@ produce the same rows and the same SHA-256 digest.
 ### Distributions
 
 `pgproof profile` samples the source and produces `core.profile.Profile`:
-null fraction, distinct count, top values and 20-bucket histograms. The
-generator asks `build_distribution` for a column and samples from it before
+null fraction, distinct count, top values and 20-bucket histograms. On tables
+above 50k rows it uses `TABLESAMPLE SYSTEM` with `REPEATABLE(seed)`; below that,
+`LIMIT`. Partitioned parents use `LIMIT` because PostgreSQL does not support
+`TABLESAMPLE` on them. Dates, timestamps and times are converted to a numeric
+axis (`toordinal`, epoch seconds, seconds since midnight), bucketed, and
+converted back by `coerce_value` during generation.
+
+The generator asks `build_distribution` for a column and samples from it before
 falling back to semantic rules.
 
 ```

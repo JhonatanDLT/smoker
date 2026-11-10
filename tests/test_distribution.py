@@ -76,6 +76,36 @@ def test_coerce_value_quantizes_to_the_column_scale() -> None:
     assert coerce_value(column, 99919.29865494293) == Decimal("99919.30")
 
 
+def test_coerce_value_dates_and_times() -> None:
+    from datetime import UTC, date, datetime, time
+
+    assert coerce_value(Column("d", "date"), date(2025, 1, 1).toordinal()) == date(
+        2025, 1, 1
+    )
+    assert coerce_value(Column("d", "date"), "2025-01-01") == date(2025, 1, 1)
+    assert coerce_value(Column("t", "time"), 3661.0) == time(1, 1, 1)
+    assert coerce_value(
+        Column("ts", "timestamp with time zone"),
+        datetime(2025, 1, 1, tzinfo=UTC).timestamp(),
+    ) == datetime(2025, 1, 1, tzinfo=UTC)
+
+
+def test_build_distribution_accepts_date_buckets() -> None:
+    stats = ColumnStats(
+        name="created_at",
+        n_distinct=365,
+        top_values=[("2025-01-01", 1)],
+        buckets=[
+            (738886.0, 738904.0, 50),
+            (738904.0, 738922.0, 50),
+        ],
+        bucket_kind="date",
+        sampled=100,
+    )
+    distribution = build_distribution(stats, Column("created_at", "date"))
+    assert isinstance(distribution, NumericDistribution)
+
+
 def test_profile_round_trip() -> None:
     profile = Profile(
         tables={

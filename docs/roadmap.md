@@ -29,7 +29,7 @@ The order is deliberate: each phase is funded by the previous one.
 ## v0.3 — Depth (in progress)
 
 - Partitioned table routing (range, list, hash). **Delivered in 0.3.0.**
-- `TABLESAMPLE` and date histograms for profiles.
+- `TABLESAMPLE` and date histograms for profiles. **Delivered in 0.3.1.**
 - Column correlations. *(pending)*
 - Sub-partitioning and multi-column partition keys. *(pending)*
 - Schema include/exclude filters. *(pending)*

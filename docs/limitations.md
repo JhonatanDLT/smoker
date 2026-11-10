@@ -33,7 +33,7 @@ This page exists because trust is built by publishing what you do **not** do.
 | Exclusion constraints (`EXCLUDE`) | `skipped` | Not generated against; PostgreSQL enforces them at load time. |
 | Cross-table business rules | not enforced | `invoice.total = SUM(lines.amount)` requires a repair pass that v1 does not have. Declare it in the spec and it will be verified, not fixed. |
 | `INSERT` mode with self-references | falls back to `COPY` | A row-by-row insert cannot reference a row that has not been inserted yet. |
-| Distributions | sampled, optional | Derived from `LIMIT n`; independent per column; disabled below 50 sampled rows. |
+| Distributions | sampled, optional | `TABLESAMPLE` above 50k rows; `LIMIT` below that and on partitioned parents. Independent per column. |
 | Repairs | explicit only | A rule is repaired only when the spec declares `repair:`. |
 | Row-level security policies | ignored | Generation uses a privileged connection. |
 | Domain constraints | partially | The base type is generated; domain `CHECK`s are enforced by PostgreSQL at load time. |
@@ -68,10 +68,10 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
 
 ## Distribution and repair limits
 
-- Profiles use `LIMIT n`. On large tables the sample is biased by physical
-  order; `TABLESAMPLE` is a v0.4 improvement.
-- Date and timestamp histograms are not used yet; dates fall back to semantic
-  generation.
+- Profiles use `TABLESAMPLE SYSTEM` above 50k rows and `LIMIT` below that.
+  `BERNOULLI` is available but slower. Partitioned parents always use `LIMIT`.
+- Date and timestamp histograms are bucketed on a numeric axis; `timestamptz`
+  is normalized to UTC.
 - Correlations between columns (country ↔ city, price ↔ category) are not
   modelled. Each distribution is sampled independently.
 - `top_values` can contain personally identifiable information. Use

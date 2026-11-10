@@ -86,12 +86,19 @@ generation.
 | `--dsn` | — | DSN or env var name |
 | `--dsn-env` | `PGPROOF_SOURCE_DSN` | Env var with the DSN |
 | `--sample` | `1000` | Rows sampled per table |
+| `--sample-method` | `auto` | `auto`, `limit`, `system` or `bernoulli` |
+| `--sample-seed` | `42` | Seed for `REPEATABLE` sampling |
 | `--out`, `-o` | `profile.json` | Output file |
 | `--no-values` | off | Omit top values for PII-sensitive schemas |
 
 ```bash
 pgproof profile --dsn-env PGPROOF_SOURCE_DSN --sample 10000 -o profile.json
 ```
+
+`auto` uses `LIMIT` below 50k rows and `TABLESAMPLE SYSTEM` above it. Partitioned
+parents always use `LIMIT`, because PostgreSQL does not support `TABLESAMPLE` on
+the parent. Dates, timestamps and times are stored as histogram buckets and
+converted back during generation.
 
 The profile stores null fractions, distinct counts, top values and 20-bucket
 histograms. It is an artifact: keep it out of public repositories.

@@ -32,6 +32,7 @@ class ColumnStats:
     maximum: Any = None
     top_values: list[tuple[Any, int]] = field(default_factory=list)
     buckets: list[tuple[float, float, int]] = field(default_factory=list)
+    bucket_kind: str = "numeric"
     sampled: int = 0
 
     def to_dict(self) -> dict[str, Any]:
@@ -43,6 +44,7 @@ class ColumnStats:
             "maximum": _jsonable(self.maximum),
             "top_values": [[_jsonable(value), count] for value, count in self.top_values],
             "buckets": [[lo, hi, count] for lo, hi, count in self.buckets],
+            "bucket_kind": self.bucket_kind,
             "sampled": self.sampled,
         }
 
@@ -60,6 +62,7 @@ class ColumnStats:
             buckets=[
                 (float(lo), float(hi), int(count)) for lo, hi, count in data.get("buckets", [])
             ],
+            bucket_kind=data.get("bucket_kind", "numeric"),
             sampled=int(data.get("sampled", 0)),
         )
 
@@ -69,11 +72,15 @@ class TableStats:
     key: str
     rows: int
     columns: dict[str, ColumnStats] = field(default_factory=dict)
+    sample_method: str = "limit"
+    sample_pct: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "key": self.key,
             "rows": self.rows,
+            "sample_method": self.sample_method,
+            "sample_pct": self.sample_pct,
             "columns": {name: column.to_dict() for name, column in self.columns.items()},
         }
 
@@ -86,6 +93,8 @@ class TableStats:
                 name: ColumnStats.from_dict(column)
                 for name, column in data.get("columns", {}).items()
             },
+            sample_method=data.get("sample_method", "limit"),
+            sample_pct=data.get("sample_pct"),
         )
 
 
@@ -94,6 +103,7 @@ class Profile:
     tables: dict[str, TableStats] = field(default_factory=dict)
     generated_at: str | None = None
     sample_size: int = 0
+    sample_method: str = "auto"
 
     def table(self, key: str) -> TableStats | None:
         return self.tables.get(key)
@@ -106,6 +116,7 @@ class Profile:
         return {
             "generated_at": self.generated_at,
             "sample_size": self.sample_size,
+            "sample_method": self.sample_method,
             "tables": {key: table.to_dict() for key, table in self.tables.items()},
         }
 
@@ -118,4 +129,5 @@ class Profile:
             },
             generated_at=data.get("generated_at"),
             sample_size=int(data.get("sample_size", 0)),
+            sample_method=data.get("sample_method", "auto"),
         )

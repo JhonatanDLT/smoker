@@ -10,6 +10,7 @@ from __future__ import annotations
 import random
 import re
 from dataclasses import dataclass
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -17,12 +18,16 @@ from .ir import Column, DataKind
 from .profile import ColumnStats
 
 _NUMERIC_SCALE = re.compile(r"numeric\s*\(\s*\d+\s*,\s*(\d+)\s*\)", re.IGNORECASE)
-_NUMERIC_KINDS = {
+_BUCKETED_KINDS = {
     DataKind.SMALLINT,
     DataKind.INT,
     DataKind.BIGINT,
     DataKind.NUMERIC,
     DataKind.FLOAT,
+    DataKind.DATE,
+    DataKind.TIMESTAMP,
+    DataKind.TIMESTAMPTZ,
+    DataKind.TIME,
 }
 
 
@@ -96,7 +101,7 @@ def build_distribution(
             return None
         return CategoricalDistribution(values, weights, stats.null_fraction)
 
-    if column.data_kind in _NUMERIC_KINDS and len(stats.buckets) >= 2:
+    if column.data_kind in _BUCKETED_KINDS and len(stats.buckets) >= 2:
         return NumericDistribution(stats.buckets, stats.null_fraction)
 
     return None
@@ -108,6 +113,35 @@ def coerce_value(column: Column, value: Any) -> Any:
         return None
     kind = column.data_kind
     try:
+        if kind == DataKind.DATE:
+            if isinstance(value, datetime):
+                return value.date()
+            if isinstance(value, date):
+                return value
+            if isinstance(value, str):
+                return date.fromisoformat(value.split(" ")[0])
+            return date.fromordinal(int(value))
+        if kind == DataKind.TIMESTAMP:
+            if isinstance(value, datetime):
+                return value.replace(tzinfo=None) if value.tzinfo else value
+            if isinstance(value, str):
+                parsed = datetime.fromisoformat(value.replace(" ", "T"))
+                return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+            return datetime(1970, 1, 1) + timedelta(seconds=float(value))
+        if kind == DataKind.TIMESTAMPTZ:
+            if isinstance(value, datetime):
+                return value if value.tzinfo else value.replace(tzinfo=UTC)
+            if isinstance(value, str):
+                parsed = datetime.fromisoformat(value.replace(" ", "T"))
+                return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+            return datetime.fromtimestamp(float(value), tz=UTC)
+        if kind == DataKind.TIME:
+            if isinstance(value, time):
+                return value
+            if isinstance(value, str):
+                return time.fromisoformat(value)
+            total = int(float(value)) % 86_400
+            return time(total // 3600, (total % 3600) // 60, total % 60)
         if kind in (DataKind.SMALLINT, DataKind.INT, DataKind.BIGINT):
             return int(value)
         if kind == DataKind.NUMERIC:
@@ -120,7 +154,7 @@ def coerce_value(column: Column, value: Any) -> Any:
             return float(value)
         if kind == DataKind.TEXT and not isinstance(value, str):
             return str(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, ArithmeticError):
         return value
     return value
 

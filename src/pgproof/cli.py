@@ -240,11 +240,28 @@ def profile_cmd(
     no_values: bool = typer.Option(
         False, "--no-values", help="Omit top values for PII-sensitive schemas"
     ),
+    sample_method: str = typer.Option(
+        "auto",
+        "--sample-method",
+        help="auto, limit, system or bernoulli",
+    ),
+    sample_seed: int = typer.Option(42, "--sample-seed"),
 ) -> None:
     """Sample the source and save a profile for distribution-aware generation."""
+    if sample_method not in {"auto", "limit", "system", "bernoulli"}:
+        _fail(
+            "invalid --sample-method: choose auto, limit, system or bernoulli"
+        )
+        return
     with connect(_dsn(dsn, dsn_env)) as connection:
         catalog = introspect(connection)
-        profile = profile_catalog(connection, catalog.tables, sample=sample)
+        profile = profile_catalog(
+            connection,
+            catalog.tables,
+            sample=sample,
+            method=sample_method,
+            seed=sample_seed,
+        )
     if no_values:
         for table in profile.tables.values():
             for column_stats in table.columns.values():
