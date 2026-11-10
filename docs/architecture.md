@@ -300,6 +300,32 @@ name. In a dump there are no OIDs, so the loader assigns synthetic ones.
 `--schema-file` makes the source DSN optional for `generate` and `run`, and
 supplies the catalog for `verify`, `plan` and `audit`.
 
+## Rule extraction
+
+Trigger and function bodies are scanned after the catalog is built:
+
+- `_if_blocks` walks `IF ... THEN ... END IF`, including nested blocks, without
+  being confused by `END IF` or `ELSIF`.
+- `_negate_condition` turns `IF <condition> THEN RAISE EXCEPTION` into the
+  invariant `NOT <condition>` and normalizes simple forms (`<`, `<=`, `=`,
+  `IN`, `IS NULL`, `BETWEEN`, `LIKE`).
+- `NEW.col := expression` becomes a derived rule `col = expression`.
+- `_identifiers` separates column references from keywords, functions and type
+  names, so a rule that references an unknown identifier is not applied.
+- `_generation_supported` limits automatic enforcement to the shapes
+  `LocalRules` can generate: comparisons with literals, `IN`, `IS NOT NULL`,
+  length limits and column-to-column assignments.
+- `_derived_confidence` grades the candidate: `0.9`–`0.95` for deterministic
+  column expressions, `0.6` for unknown functions, `0.4` for `now()`/`random()`,
+  `0.3` for self-referential assignments and `0.2` for dynamic SQL.
+
+Rules travel in `Catalog.rules` as `RuleCandidate` objects with `kind`,
+`table`, `expression`, `columns`, `confidence`, `applied`, `note` and
+`provenance` (`trigger` or `function`). Applied rules are also appended to
+`table.checks`, so the generator enforces them and the verifier reports them
+like declared constraints. Candidates that are not applied still appear in the
+report for review.
+
 ## Security
 
 - Credentials come from the environment or `--dsn`, never from the report.

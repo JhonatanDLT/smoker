@@ -138,6 +138,19 @@ class Provenance:
 
 
 @dataclass
+class RuleCandidate:
+    id: str
+    kind: str  # check | derived | condition
+    table: str
+    expression: str
+    columns: list[str] = field(default_factory=list)
+    confidence: float = 0.0
+    applied: bool = False
+    provenance: Provenance | None = None
+    note: str | None = None
+
+
+@dataclass
 class SqlObject:
     kind: str
     schema: str | None
@@ -285,6 +298,7 @@ class Catalog:
     schemas: list[str] = field(default_factory=list)
     functions: list[Function] = field(default_factory=list)
     objects: list[SqlObject] = field(default_factory=list)
+    rules: list[RuleCandidate] = field(default_factory=list)
 
     def table(self, key: str) -> Table:
         for table in self.tables:
@@ -393,6 +407,20 @@ class Catalog:
                     provenance=_provenance(obj.get("provenance")) or Provenance("dump", ""),
                 )
                 for obj in data.get("objects", [])
+            ],
+            rules=[
+                RuleCandidate(
+                    id=rule.get("id", ""),
+                    kind=rule.get("kind", "check"),
+                    table=rule.get("table", ""),
+                    expression=rule.get("expression", ""),
+                    columns=list(rule.get("columns", [])),
+                    confidence=float(rule.get("confidence", 0.0)),
+                    applied=bool(rule.get("applied", False)),
+                    provenance=_provenance(rule.get("provenance")),
+                    note=rule.get("note"),
+                )
+                for rule in data.get("rules", [])
             ],
         )
 

@@ -49,7 +49,15 @@ The order is deliberate: each phase is funded by the previous one.
 - Inferred foreign keys from naming and view JOINs.
 - `--schema-file` for `plan`, `audit`, `generate`, `verify` and `run`.
 
-## v0.5 — SQL Server (months 4–6)
+## v0.5 — Code-derived rules (delivered in 0.5.0)
+
+- Extract `IF … RAISE EXCEPTION` and `NEW.col := …` from trigger and function
+  bodies.
+- Apply simple, deterministic rules as checks; report the rest as candidates.
+- Show rules and provenance in JSON and HTML.
+- End-to-end test from dump to generated data to verified report.
+
+## v0.6 — SQL Server (months 4–6)
 
 Only if two paying customers request it in writing.
 
@@ -59,7 +67,7 @@ Only if two paying customers request it in writing.
 - SQL Server as a **target** for generation.
 - Same invariant model, same report.
 
-## v0.6 — Other dialects (months 7–9)
+## v0.7 — Other dialects (months 7–9)
 
 - MySQL / MariaDB.
 - Oracle only with an enterprise contract that funds the work.

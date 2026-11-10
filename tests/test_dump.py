@@ -325,3 +325,189 @@ def test_dump_only_generation_passes() -> None:
         connection.close()
 
     assert report.verdict == "PASS"
+
+
+def test_trigger_rules_become_invariants() -> None:
+    dump = """
+    CREATE TABLE accounts (
+        id integer PRIMARY KEY,
+        amount numeric,
+        subtotal numeric,
+        tax numeric,
+        total numeric,
+        status text,
+        updated_at timestamptz
+    );
+    CREATE FUNCTION enforce() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+        IF NEW.amount < 0 THEN
+            RAISE EXCEPTION 'amount must be non-negative';
+        END IF;
+        IF NEW.status NOT IN ('open', 'closed') THEN
+            RAISE EXCEPTION 'bad status';
+        END IF;
+        NEW.total := NEW.subtotal + NEW.tax;
+        NEW.updated_at := now();
+        RETURN NEW;
+    END;
+    $$;
+    CREATE TRIGGER accounts_enforce BEFORE INSERT OR UPDATE ON accounts
+        FOR EACH ROW EXECUTE FUNCTION enforce();
+    """
+    catalog = DumpLoader().load(dump)
+    rules = {(rule.kind, rule.expression): rule for rule in catalog.rules}
+
+    check = rules[("check", "amount >= 0")]
+    assert check.applied is True
+    assert check.table == "public.accounts"
+    assert check.columns == ["amount"]
+    assert check.provenance is not None
+    assert check.provenance.kind == "trigger"
+    assert check.confidence >= 0.9
+
+    status = rules[("check", "status IN ('open', 'closed')")]
+    assert status.applied is True
+
+    derived = rules[("derived", "total = subtotal + tax")]
+    assert derived.applied is True
+    assert derived.columns == ["subtotal", "tax", "total"]
+
+    noisy = rules[("derived", "updated_at = now()")]
+    assert noisy.applied is False
+    assert noisy.confidence < 0.9
+    assert noisy.columns == ["updated_at"]
+
+    predicates = {check.predicate for check in catalog.table("public.accounts").checks}
+    assert {"amount >= 0", "status IN ('open', 'closed')", "total = subtotal + tax"} <= predicates
+    assert "updated_at = now()" not in predicates
+
+
+def test_function_rules_are_candidates_not_applied() -> None:
+    dump = """
+    CREATE TABLE t (id integer PRIMARY KEY, amount numeric);
+    CREATE FUNCTION validate_amount(value numeric) RETURNS void LANGUAGE plpgsql AS $$
+    BEGIN
+        IF value < 0 THEN
+            RAISE EXCEPTION 'negative';
+        END IF;
+    END;
+    $$;
+    """
+    catalog = DumpLoader().load(dump)
+    rule = catalog.rules[0]
+
+    assert rule.kind == "check"
+    assert rule.table == ""
+    assert rule.applied is False
+    assert rule.provenance is not None
+    assert rule.provenance.kind == "function"
+    assert catalog.table("public.t").checks == []
+
+
+def test_compound_condition_is_a_low_confidence_candidate() -> None:
+    dump = """
+    CREATE TABLE t (id integer PRIMARY KEY, a integer, b integer);
+    CREATE FUNCTION f() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+        IF NEW.a > 0 AND NEW.b > 0 THEN
+            RAISE EXCEPTION 'both';
+        END IF;
+        RETURN NEW;
+    END;
+    $$;
+    CREATE TRIGGER t_f BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION f();
+    """
+    catalog = DumpLoader().load(dump)
+    rule = catalog.rules[0]
+
+    assert rule.expression == "NOT (a > 0 AND b > 0)"
+    assert rule.applied is False
+    assert rule.confidence < 0.9
+    assert catalog.table("public.t").checks == []
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not DSN, reason="PGPROOF_TEST_DSN is not set")
+def test_trigger_rules_drive_generation_and_verification() -> None:
+    assert DSN
+    schema = "pgproof_rules_test"
+    dump = f"""
+    DROP SCHEMA IF EXISTS {schema} CASCADE;
+    CREATE SCHEMA {schema};
+    SET search_path TO {schema};
+    CREATE TABLE lines (
+        id integer PRIMARY KEY,
+        quantity integer NOT NULL,
+        unit_price numeric NOT NULL,
+        amount numeric NOT NULL
+    );
+    CREATE FUNCTION enforce() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+        IF NEW.quantity <= 0 THEN
+            RAISE EXCEPTION 'quantity must be positive';
+        END IF;
+        NEW.amount := NEW.quantity * NEW.unit_price;
+        RETURN NEW;
+    END;
+    $$;
+    CREATE TRIGGER lines_enforce BEFORE INSERT ON lines
+        FOR EACH ROW EXECUTE FUNCTION enforce();
+    """
+    subprocess.run(
+        ["psql", DSN, "-q", "-v", "ON_ERROR_STOP=1", "-c", dump],
+        check=True,
+        capture_output=True,
+    )
+    catalog = DumpLoader().load(dump)
+    table = catalog.table(f"{schema}.lines")
+    predicates = {check.predicate for check in table.checks}
+
+    assert "quantity > 0" in predicates
+    assert "amount = quantity * unit_price" in predicates
+    assert all(rule.applied for rule in catalog.rules)
+
+    connection = psycopg.connect(DSN)
+    writer = PostgresRowWriter(connection)
+    try:
+        generated = GenerateDataset(catalog, writer, rows=20, seed=13).execute()
+    finally:
+        writer.close()
+
+    connection = psycopg.connect(DSN)
+    try:
+        report = VerifyDataset(
+            catalog, PostgresQueryRunner(connection), YamlSpecLoader(), seed=13
+        ).execute(
+            VerifyRequest(dataset_hash=generated.dataset_hash, plan=generated.plan)
+        )
+    finally:
+        connection.close()
+
+    assert report.verdict == "PASS"
+    assert any(result.provenance and "lines_enforce" in result.provenance for result in report.results)
+
+
+def test_nested_and_else_rules_are_not_overgeneralized() -> None:
+    dump = """
+    CREATE TABLE t (id integer PRIMARY KEY, a integer, b integer, c integer);
+    CREATE FUNCTION f() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+        IF NEW.a > 0 THEN
+            IF NEW.b > 0 THEN
+                RAISE EXCEPTION 'nested';
+            END IF;
+        END IF;
+        IF NEW.c > 0 THEN
+            NULL;
+        ELSE
+            RAISE EXCEPTION 'else branch';
+        END IF;
+        RETURN NEW;
+    END;
+    $$;
+    CREATE TRIGGER t_f BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION f();
+    """
+    catalog = DumpLoader().load(dump)
+
+    assert catalog.rules == []
+    assert catalog.table("public.t").checks == []

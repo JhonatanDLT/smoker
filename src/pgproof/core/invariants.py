@@ -46,6 +46,7 @@ class Invariant:
     confidence: float = 1.0
     note: str | None = None
     repair_sql: str | None = None
+    provenance: str | None = None
 
     @property
     def key(self) -> str:
@@ -215,6 +216,14 @@ def parse_local_rules(table: Table) -> LocalRules:
             if target in known_columns and left in known_columns and right in known_columns:
                 rules.derived.append((target, left, operator, right))
                 matched = True
+        for target, source in re.findall(
+            r"\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\b"
+            r"(?!\s*[+\-*/])",
+            predicate,
+        ):
+            if target in known_columns and source in known_columns and target != source:
+                rules.derived.append((target, source, "copy", ""))
+                matched = True
         for left, operator, right in re.findall(
             rf"\b([A-Za-z_][A-Za-z0-9_]*){cast}\s*(>=|<=|>|<)\s*([A-Za-z_][A-Za-z0-9_]*){cast}\b",
             predicate,
@@ -314,6 +323,7 @@ def invariants_from_catalog(catalog: Catalog) -> list[Invariant]:
                         f"SELECT {columns}, count(*) AS duplicates FROM {qualified} "
                         f"WHERE {not_null} GROUP BY {columns} HAVING count(*) > 1"
                     ),
+                    provenance=unique.provenance.source if unique.provenance else None,
                 )
             )
 
@@ -342,6 +352,7 @@ def invariants_from_catalog(catalog: Catalog) -> list[Invariant]:
                         f"SELECT 1 FROM {_q(fk.parent_schema, fk.parent_table)} p "
                         f"WHERE {joins})"
                     ),
+                    provenance=fk.provenance.source if fk.provenance else None,
                 )
             )
 
@@ -373,6 +384,7 @@ def invariants_from_catalog(catalog: Catalog) -> list[Invariant]:
                         f"WHERE ({predicate}) IS FALSE"
                     ),
                     note=None if check.validated else "constraint is NOT VALID on existing rows",
+                    provenance=check.provenance.source if check.provenance else None,
                 )
             )
 
@@ -468,6 +480,7 @@ def invariants_to_dict(invariants: list[Invariant]) -> list[dict[str, Any]]:
             "note": inv.note,
             "violation_sql": inv.violation_sql,
             "repair_sql": inv.repair_sql,
+            "provenance": inv.provenance,
         }
         for inv in invariants
     ]

@@ -1,10 +1,10 @@
 # Status
 
 **Date:** 2026-11-10
-**Version:** 0.4.1
+**Version:** 0.5.0
 **State:** working v1 plus CI output, repair loop, distribution-aware
-generation, partitioned tables and offline schema dumps. Tested end to end
-against PostgreSQL 16.
+generation, partitioned tables, offline schema dumps and code-derived rules.
+Tested end to end against PostgreSQL 16.
 
 ---
 
@@ -18,6 +18,8 @@ against PostgreSQL 16.
 | `LIKE`, `INHERITS`, `ATTACH PARTITION`, CTEs and dynamic SQL | ✅ |
 | **Inferred foreign keys** from `*_id` naming and view JOINs | ✅ |
 | **Provenance** on tables, constraints, FKs, functions, triggers and raw objects | ✅ |
+| **Trigger/function rule extraction** (`RAISE EXCEPTION`, `NEW.col :=`) with provenance | ✅ |
+| **Rules in the report** (`rules[]`, HTML table) and per-invariant provenance | ✅ |
 | Invariants from NOT NULL, UNIQUE, PK, FK, CHECK, enums | ✅ |
 | Application rules from YAML spec | ✅ |
 | Deterministic generation (seed per table) | ✅ |
@@ -80,7 +82,11 @@ against PostgreSQL 16.
 - Dump hardening: `LIKE ... INCLUDING ALL`, `INHERITS`, `ATTACH PARTITION`,
   CTE joins, dynamic SQL and `IF`/`CASE` conditions are extracted and covered by
   tests.
-- **97 tests passing** (unit, integration and architecture guards).
+- Rule extraction: `IF NEW.quantity <= 0 THEN RAISE EXCEPTION` becomes the
+  enforced check `quantity > 0`; `NEW.amount := NEW.quantity * NEW.unit_price`
+  becomes the derived rule `amount = quantity * unit_price`. Dump-only
+  generation of that schema passes end to end.
+- **102 tests passing** (unit, integration and architecture guards).
 - Same seed produces the same dataset hash every run.
 
 ## Documentation
@@ -135,8 +141,14 @@ cli ──► application ──► core (domain + ports)
 
 - Dump loading: `CREATE RULE`, event triggers and policies are stored raw but
   not applied; `CREATE TABLE ... AS SELECT` is stored raw.
-- PL/pgSQL bodies are stored and scanned for dynamic SQL and conditions, but not
-  interpreted; trigger effects are not replayed.
+- PL/pgSQL bodies are stored and scanned for dynamic SQL and conditions. Simple
+  `IF ... RAISE` conditions and non-self-referential `NEW.col :=` assignments
+  become checks; compound conditions and non-deterministic assignments stay as
+  candidates.
+- Trigger effects are inventoried and their simple rules are enforced, but the
+  trigger is not replayed.
+- Rule extraction runs on `.sql` dumps; live introspection still inventories
+  functions and triggers without deriving rules from them.
 - Inferred foreign keys are heuristic; check the `inferred` flag.
 - Exclusion constraints are not generated against.
 - Distributions are per column; correlations are not modelled.
@@ -148,10 +160,10 @@ See [`docs/limitations.md`](docs/limitations.md).
 
 ## Next tasks
 
-1. Extract trigger/function rules (`RAISE EXCEPTION`, `NEW.col :=`) with
-   provenance.
-2. Build the creation/insertion order from provenance (types, tables,
-   functions, triggers, views, rules).
+1. Build the creation/insertion order from provenance and dependencies (types,
+   sequences, tables in FK order, functions, triggers, views, rules, policies).
+2. Wire the order into `load-dump`, `plan` and the report, so a dump can be
+   replayed in a dependency-safe order.
 3. Column correlations and parallel verification.
 4. SQL Server adapter.
 5. Publish to PyPI and the GitHub Marketplace; first design-partner pilot.

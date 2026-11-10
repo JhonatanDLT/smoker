@@ -27,6 +27,7 @@ class InvariantResult:
     sql: str = ""
     error: str | None = None
     note: str | None = None
+    provenance: str | None = None
 
 
 @dataclass
@@ -76,6 +77,7 @@ def verify_all(
                     status="skipped",
                     sql=invariant.violation_sql,
                     note=invariant.note,
+                    provenance=invariant.provenance,
                 )
             )
             continue
@@ -95,6 +97,7 @@ def verify_all(
                     sample=sample,
                     sql=sql,
                     note=invariant.note,
+                    provenance=invariant.provenance,
                 )
             )
         except Exception as exc:  # noqa: BLE001 - report, never crash a whole run
@@ -108,6 +111,7 @@ def verify_all(
                     sql=sql,
                     error=str(exc).strip(),
                     note=invariant.note,
+                    provenance=invariant.provenance,
                 )
             )
 

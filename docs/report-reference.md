@@ -33,6 +33,7 @@ proof/
 | `limitations` | array | What was not verified |
 | `reproduce` | string | Command that produced the report |
 | `repairs` | object | Repairs applied |
+| `rules` | array | Rules extracted from triggers and functions |
 
 ### `summary`
 
@@ -60,6 +61,7 @@ proof/
 | `sql` | Query used to find them |
 | `error` | Database error, when `status = error` |
 | `note` | Why it was skipped, or a caveat |
+| `provenance` | Where the rule came from (`CREATE TABLE …`, trigger name, inferred key) |
 | `sample` | Up to `--sample` offending rows |
 
 ### `repairs`
@@ -86,6 +88,39 @@ proof/
 `residual` is the number of violations left in repairable rules after the loop.
 It is `0` when the repair converged.
 
+### `rules`
+
+Rules extracted from trigger and function bodies. They are not declared
+constraints; they are code-derived candidates.
+
+```json
+[
+  {
+    "id": "rule:billing.invoice_lines:1",
+    "kind": "derived",
+    "table": "billing.invoice_lines",
+    "expression": "amount = quantity * unit_price",
+    "columns": ["amount", "quantity", "unit_price"],
+    "confidence": 0.9,
+    "applied": true,
+    "provenance": {
+      "kind": "trigger",
+      "source": "invoice_lines_amount",
+      "detail": "billing.set_line_amount"
+    },
+    "note": "NEW.amount := quantity * unit_price"
+  }
+]
+```
+
+- `kind` is `check` (from `IF … RAISE`) or `derived` (from `NEW.col := …`).
+- `confidence` is `0.0`–`1.0`; only `applied = true` rules are enforced as
+  checks and included in generation.
+- `applied = false` means the rule is reported but needs review: compound
+  conditions, unknown functions, `now()`, `random()`, or self-referential
+  assignments.
+- `provenance.kind` is `trigger` or `function`.
+
 ## Hashes
 
 - **`schema_hash`** covers the catalog: tables, columns, constraints, enums.
@@ -109,7 +144,7 @@ profile changed.
 
 The HTML report is a single self-contained file: no external fonts, no scripts.
 It contains the verdict, the summary, every invariant, failures with samples,
-repairs, warnings and limitations.
+repairs, extracted rules, warnings and limitations.
 
 ## JUnit XML
 

@@ -4,6 +4,32 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [0.5.0] — 2026-11-10
+
+### Added
+
+- **Rule extraction from triggers and functions**:
+  - `IF <condition> THEN RAISE EXCEPTION|ERROR|WARNING` → invariant candidate
+    `NOT <condition>`.
+  - `NEW.<col> := <expression>` → derived rule `<col> = <expression>`.
+  - Every rule has `confidence`, `applied`, `columns`, `note` and
+    `provenance` (`trigger` or `function`).
+- **Simple rules become real checks**: comparisons, `IN`, `IS NOT NULL`,
+  `BETWEEN`, `LIKE`, length limits and column-to-column assignments are added to
+  `table.checks`, so generation enforces them and verification reports them.
+- **Rules in the report**: `rules[]` in JSON, an "Extracted rules" table in HTML,
+  and `provenance` on each invariant result.
+- End-to-end test: a dump with a trigger rule is generated, loaded and verified.
+
+### Changed
+
+- Derived-rule parsing no longer lets a bare copy rule (`a = b`) override an
+  arithmetic rule (`a = b * c`).
+
+### Measured
+
+- 102 tests passing.
+
 ## [0.4.1] — 2026-11-10
 
 ### Added

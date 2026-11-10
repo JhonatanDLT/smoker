@@ -17,6 +17,9 @@ def test_load_dump_command(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     catalog = json.loads(out.read_text(encoding="utf-8"))
     assert len(catalog["tables"]) == 10
+    assert catalog["tables"][0]["provenance"]["kind"] == "dump"
+    assert catalog["rules"][0]["provenance"]["kind"] == "trigger"
+    assert catalog["rules"][0]["applied"] is False
 
 
 def test_plan_works_from_a_dump_without_a_database(tmp_path: Path) -> None:

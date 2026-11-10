@@ -39,6 +39,7 @@ class HtmlRenderer:
         )
         verdict_class = "pass" if report.verdict == "PASS" else "fail"
         repairs_block = _repairs_block(report)
+        rules_block = _rules_block(report)
 
         return f"""<!doctype html>
 <html lang="en">
@@ -123,6 +124,8 @@ class HtmlRenderer:
 
   {repairs_block}
 
+  {rules_block}
+
   {f'<h2>Failures</h2>{failures}' if failures else ''}
 
   <h2>Not verified</h2>
@@ -170,6 +173,30 @@ def _failure_block(result: InvariantResult) -> str:
         f"<h3><code>{html.escape(result.id)}</code></h3>"
         f"<p>{html.escape(result.description)} — <strong>{result.violations}</strong> violating rows.</p>"
         f"<pre><code>{html.escape(sample)}</code></pre>"
+    )
+
+
+def _rules_block(report: Report) -> str:
+    rules = getattr(report, "rules", [])
+    if not rules:
+        return ""
+    rows = "\n".join(
+        f"<tr><td><code>{html.escape(str(rule.get('kind', '')))}</code></td>"
+        f"<td><code>{html.escape(str(rule.get('table', '')))}</code></td>"
+        f"<td><code>{html.escape(str(rule.get('expression', '')))}</code></td>"
+        f"<td>{html.escape(str(rule.get('confidence', '')))}</td>"
+        f"<td>{'yes' if rule.get('applied') else 'no'}</td>"
+        f"<td>{html.escape(str((rule.get('provenance') or {}).get('kind', '')))}</td>"
+        f"<td>{html.escape(str(rule.get('note') or ''))}</td></tr>"
+        for rule in rules
+    )
+    return (
+        "<h2>Extracted rules</h2>"
+        "<table><thead><tr><th>Kind</th><th>Table</th><th>Expression</th>"
+        "<th>Confidence</th><th>Applied</th><th>Provenance</th><th>Note</th></tr>"
+        f"</thead><tbody>{rows}</tbody></table>"
+        "<p class=\"sub\">Rules come from trigger and function bodies. Declared "
+        "constraints are verified separately; these are derived from code.</p>"
     )
 
 

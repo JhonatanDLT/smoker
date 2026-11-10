@@ -76,7 +76,17 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
 - `COPY ... FROM stdin` data is skipped. Only the schema is loaded.
 - PL/pgSQL and PL/SQL bodies are stored and scanned for dynamic SQL, `IF` and
   `CASE` conditions, and write/read targets. They are not interpreted; triggers
-  are inventoried, not replayed.
+  are not replayed.
+- Only simple trigger/function rules become enforced checks: comparisons,
+  `IN`, `IS NOT NULL`, `BETWEEN`, `LIKE`, length limits and column-to-column
+  assignments. Compound conditions (`AND`/`OR`), unknown functions,
+  `now()`/`random()` and self-referential assignments are reported as
+  candidates with lower confidence.
+- Rules derived from a plain function (not used by a trigger) have no table
+  target and are reported but never applied.
+- Rule extraction runs on the offline dump loader. Live introspection still
+  inventories functions and triggers but does not derive rules from their
+  bodies.
 - `CREATE RULE`, event triggers and RLS policies are stored as raw objects but
   not applied.
 - `CREATE TABLE ... AS SELECT` is stored raw and not expanded.

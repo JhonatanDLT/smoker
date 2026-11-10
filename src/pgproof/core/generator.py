@@ -306,6 +306,10 @@ class Generator:
     def _apply_derived(self, table: Table, values: dict[str, Any]) -> None:
         for target, left, operator, right in self.rules[table.key].derived:
             a = values.get(left)
+            if operator == "copy":
+                if a is not None:
+                    values[target] = a
+                continue
             b = values.get(right)
             if a is None or b is None:
                 continue

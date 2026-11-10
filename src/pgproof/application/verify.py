@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..core.invariants import Invariant, invariants_from_catalog, merge_invariants
-from ..core.ir import Catalog
+from ..core.ir import Catalog, to_plain
 from ..core.planner import Plan, build_plan
 from ..core.ports import QueryRunner, SpecLoader
 from ..core.repair import RepairResult
@@ -59,4 +59,5 @@ class VerifyDataset:
             command=request.command,
             dataset_hash=request.dataset_hash,
             repairs=request.repairs,
+            rules=[to_plain(rule) for rule in self.catalog.rules],
         )

@@ -30,6 +30,7 @@ from ...core.ir import (
     Function,
     Partition,
     Provenance,
+    RuleCandidate,
     SqlObject,
     Table,
     Trigger,
@@ -204,6 +205,8 @@ class DumpLoader:
         self.trigger_specs: list[dict[str, Any]] = []
         self.views: list[str] = []
         self.objects: list[SqlObject] = []
+        self.rules: list[RuleCandidate] = []
+        self._rule_keys: set[tuple[str, str, str]] = set()
         self.partition_relations: list[dict[str, Any]] = []
         self.attach_relations: list[dict[str, Any]] = []
         self.partition_specs: dict[str, tuple[str, list[str]]] = {}
@@ -227,6 +230,7 @@ class DumpLoader:
         self._build_partitions()
         self._infer_relationships()
         self._analyze_functions()
+        self._extract_rules()
         return Catalog(
             database=self.database,
             server_version="dump",
@@ -234,6 +238,7 @@ class DumpLoader:
             schemas=sorted({table.schema for table in self.tables.values()}),
             functions=self.functions,
             objects=self.objects,
+            rules=self.rules,
         )
 
     def _statement(self, statement: str) -> None:
@@ -1063,6 +1068,136 @@ class DumpLoader:
             conditions.append(" ".join(match.group(1).split()))
         return conditions
 
+    # --------------------------------------------------------- extracted rules
+    def _extract_rules(self) -> None:
+        trigger_by_function: dict[tuple[str, str], dict[str, Any]] = {}
+        for spec in self.trigger_specs:
+            function = self.function_by_name.get(
+                spec["function_key"]
+            ) or self.function_by_name.get(spec["function_name"])
+            if function is not None:
+                trigger_by_function[(function.schema, function.name)] = spec
+
+        for function in self.functions:
+            spec = trigger_by_function.get((function.schema, function.name))
+            if spec is not None:
+                table_key = spec["table_key"]
+                provenance = Provenance(
+                    kind="trigger",
+                    source=spec["name"],
+                    detail=f"{function.schema}.{function.name}",
+                )
+            else:
+                table_key = None
+                provenance = Provenance(
+                    kind="function",
+                    source=f"{function.schema}.{function.name}",
+                )
+            self._rules_from_body(function.body, table_key, provenance)
+
+    def _rules_from_body(
+        self,
+        body: str,
+        table_key: str | None,
+        provenance: Provenance,
+    ) -> None:
+        if not body:
+            return
+        table = self.tables.get(table_key) if table_key else None
+        known_columns = {column.name for column in table.columns} if table else set()
+
+        blocks = _if_blocks(body)
+        for index, (condition, block, start, end) in enumerate(blocks):
+            if any(
+                other_start < start and end <= other_end
+                for other_index, (_, _, other_start, other_end) in enumerate(blocks)
+                if other_index != index
+            ):
+                continue
+            raise_match = re.search(
+                r"\bRAISE\s+(?:EXCEPTION|ERROR)\b", block, re.IGNORECASE
+            )
+            if raise_match is None:
+                continue
+            nested = re.search(r"\bIF\b", block, re.IGNORECASE)
+            if nested is not None and nested.start() < raise_match.start():
+                continue
+            else_match = re.search(r"\bELSE\b", block, re.IGNORECASE)
+            if else_match is not None and else_match.start() < raise_match.start():
+                continue
+            negated = _negate_condition(condition)
+            if negated is None:
+                continue
+            expression, confidence, columns = negated
+            enforce = (
+                table is not None
+                and confidence >= 0.9
+                and _identifiers(expression) <= known_columns
+                and _generation_supported(expression)
+            )
+            self._add_rule(
+                RuleCandidate(
+                    id=f"rule:{table_key or 'function'}:{len(self.rules) + 1}",
+                    kind="check",
+                    table=table_key or "",
+                    expression=expression,
+                    columns=columns,
+                    confidence=confidence,
+                    applied=enforce,
+                    provenance=provenance,
+                    note=f"IF {condition} THEN RAISE",
+                )
+            )
+
+        for target, raw_expression in re.findall(
+            r"NEW\.(\w+)\s*:=\s*(.+?);", body, re.IGNORECASE | re.DOTALL
+        ):
+            expression = _strip_row_vars(" ".join(raw_expression.split()))
+            identifiers = _identifiers(expression)
+            confidence = _derived_confidence(expression, target, known_columns)
+            self_referential = target in identifiers
+            enforce = (
+                table is not None
+                and confidence >= 0.9
+                and target in known_columns
+                and not self_referential
+                and identifiers <= known_columns
+                and _generation_supported(f"{target} = {expression}")
+            )
+            note = f"NEW.{target} := {expression}"
+            if self_referential:
+                note += " (self-referential; not a static invariant)"
+            self._add_rule(
+                RuleCandidate(
+                    id=f"rule:{table_key or 'function'}:{len(self.rules) + 1}",
+                    kind="derived",
+                    table=table_key or "",
+                    expression=f"{target} = {expression}",
+                    columns=sorted(identifiers | {target}),
+                    confidence=confidence,
+                    applied=enforce,
+                    provenance=provenance,
+                    note=note,
+                )
+            )
+
+    def _add_rule(self, rule: RuleCandidate) -> None:
+        key = (rule.table, rule.kind, rule.expression)
+        if key in self._rule_keys:
+            return
+        self._rule_keys.add(key)
+        if rule.applied and rule.table in self.tables:
+            table = self.tables[rule.table]
+            table.checks.append(
+                CheckConstraint(
+                    name=rule.id,
+                    definition=f"CHECK ({rule.expression})",
+                    predicate=rule.expression,
+                    provenance=rule.provenance,
+                )
+            )
+        self.rules.append(rule)
+
     # --------------------------------------------------------- relationships
     def _infer_relationships(self) -> None:
         for table in list(self.tables.values()):
@@ -1189,6 +1324,203 @@ class DumpLoader:
             self._infer_joins_from_query(
                 tree.expression, Provenance(kind, statement.splitlines()[0][:200])
             )
+
+
+def _clean_sql(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _strip_row_vars(text: str) -> str:
+    return re.sub(r"\b(?:NEW|OLD)\.", "", text, flags=re.IGNORECASE)
+
+
+def _strip_outer_parens(text: str) -> str:
+    while text.startswith("(") and text.endswith(")"):
+        depth = 0
+        balanced = True
+        for index, char in enumerate(text):
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0 and index != len(text) - 1:
+                    balanced = False
+                    break
+        if not balanced or depth != 0:
+            break
+        text = text[1:-1].strip()
+    return text
+
+
+def _if_blocks(body: str) -> list[tuple[str, str, int, int]]:
+    """Return ``(condition, block, start, end)`` for every ``IF ... END IF``."""
+    blocks: list[tuple[str, str, int, int]] = []
+    for match in re.finditer(r"\bIF\b", body, re.IGNORECASE):
+        prefix = body[max(0, match.start() - 32) : match.start()]
+        if re.search(r"(?:END|ELSE|ELSIF)\s*$", prefix, re.IGNORECASE):
+            continue
+        then = re.search(r"\bTHEN\b", body[match.end() :], re.IGNORECASE)
+        if then is None:
+            continue
+        condition = _clean_sql(body[match.end() : match.end() + then.start()])
+        if not condition:
+            continue
+        depth = 1
+        end: int | None = None
+        start = match.end() + then.end()
+        for token in re.finditer(r"\bIF\b", body[start:], re.IGNORECASE):
+            before = body[start + max(0, token.start() - 16) : start + token.start()]
+            if re.search(r"END\s*$", before, re.IGNORECASE):
+                depth -= 1
+                if depth == 0:
+                    end = start + token.start()
+                    break
+            else:
+                depth += 1
+        if end is None:
+            continue
+        blocks.append((condition, body[start:end], start, end))
+    return blocks
+
+
+_FLIP = {"<": ">=", "<=": ">", ">": "<=", ">=": "<", "=": "<>", "<>": "=", "!=": "="}
+
+
+def _negate_condition(condition: str) -> tuple[str, float, list[str]] | None:
+    """Turn ``IF <condition> THEN RAISE`` into the invariant ``NOT <condition>``."""
+    text = _strip_outer_parens(_strip_row_vars(_clean_sql(condition)))
+    if not text:
+        return None
+
+    if re.match(r"^NOT\s+", text, re.IGNORECASE):
+        expression = re.sub(r"^NOT\s+", "", text, count=1, flags=re.IGNORECASE)
+        return expression, 0.9, sorted(_identifiers(expression))
+
+    match = re.match(r"^(.+?)\s+IS\s+(NOT\s+)?NULL$", text, re.IGNORECASE | re.DOTALL)
+    if match:
+        expression = f"{match.group(1)} IS {'NULL' if match.group(2) else 'NOT NULL'}"
+        return expression, 0.95, sorted(_identifiers(expression))
+
+    match = re.match(r"^(.+?)\s+IS\s+(NOT\s+)?DISTINCT\s+FROM\s+(.+)$", text, re.IGNORECASE | re.DOTALL)
+    if match:
+        qualifier = "DISTINCT FROM" if match.group(2) else "NOT DISTINCT FROM"
+        expression = f"{match.group(1)} IS {qualifier} {match.group(3)}"
+        return expression, 0.9, sorted(_identifiers(expression))
+
+    match = re.match(r"^(.+?)\s+BETWEEN\s+(.+?)\s+AND\s+(.+)$", text, re.IGNORECASE | re.DOTALL)
+    if match:
+        expression = f"{match.group(1)} NOT BETWEEN {match.group(2)} AND {match.group(3)}"
+        return expression, 0.9, sorted(_identifiers(expression))
+
+    if re.search(r"\b(AND|OR)\b", text, re.IGNORECASE):
+        expression = f"NOT ({text})"
+        return expression, 0.6, sorted(_identifiers(expression))
+
+    match = re.match(r"^(.+?)\s+(NOT\s+)?(IN|LIKE|ILIKE)\s*(.+)$", text, re.IGNORECASE | re.DOTALL)
+    if match:
+        operator = match.group(3).upper()
+        negative = "" if match.group(2) else "NOT "
+        expression = f"{match.group(1)} {negative}{operator} {match.group(4)}"
+        return expression, 0.9, sorted(_identifiers(expression))
+
+    match = re.match(r"^(.+?)\s*(<=|>=|<>|!=|=|<|>)\s*(.+)$", text, re.DOTALL)
+    if match and match.group(2) in _FLIP:
+        expression = (
+            f"{match.group(1).strip()} {_FLIP[match.group(2)]} {match.group(3).strip()}"
+        )
+        return expression, 0.95, sorted(_identifiers(expression))
+
+    return f"NOT ({text})", 0.5, sorted(_identifiers(text))
+
+
+_NON_COLUMN_WORDS = {
+    "and", "or", "not", "is", "null", "true", "false", "in", "between", "like",
+    "ilike", "distinct", "from", "as", "case", "when", "then", "else", "end",
+    "current_date", "current_time", "current_timestamp", "localtime",
+    "localtimestamp", "interval", "year", "month", "day", "hour", "minute",
+    "second", "days", "hours", "minutes", "seconds", "weeks", "months", "years",
+    "double", "precision", "numeric", "decimal", "integer", "int", "bigint",
+    "smallint", "text", "varchar", "character", "varying", "char", "timestamp",
+    "timestamptz", "date", "time", "boolean", "bool", "jsonb", "json", "uuid",
+    "bytea", "real", "float", "serial", "bigserial", "collate", "epoch",
+}
+
+_KNOWN_FUNCTIONS = {
+    "abs", "ceil", "ceiling", "floor", "round", "trunc", "length", "char_length",
+    "lower", "upper", "trim", "btrim", "ltrim", "rtrim", "coalesce", "nullif",
+    "greatest", "least", "concat", "substr", "substring", "replace", "to_char",
+    "to_date", "to_timestamp", "date_trunc", "extract", "regexp_replace",
+    "split_part", "md5", "now", "random", "nextval", "currval", "setval",
+    "gen_random_uuid", "uuid_generate_v4", "make_interval", "age",
+}
+
+
+def _identifiers(expression: str) -> set[str]:
+    """Column-like identifiers in an expression, ignoring functions and keywords."""
+    cleaned = re.sub(r"'(?:[^']|'')*'", "''", expression)
+    cleaned = re.sub(r"\b(?:NEW|OLD)\.", "", cleaned, flags=re.IGNORECASE)
+    found: set[str] = set()
+    for match in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)\b", cleaned):
+        name = match.group(1)
+        if name.lower() in _NON_COLUMN_WORDS:
+            continue
+        if cleaned[match.end() :].lstrip().startswith("("):
+            continue
+        found.add(name)
+    return found
+
+
+def _generation_supported(predicate: str) -> bool:
+    text = predicate.strip()
+    if re.search(r"\bSELECT\b", text, re.IGNORECASE):
+        return False
+    if re.search(
+        r"\b(?:now|current_timestamp|current_date|current_time|random|nextval|"
+        r"clock_timestamp|statement_timestamp|transaction_timestamp)\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return False
+    literal = r"(?:\d+(?:\.\d+)?|'(?:[^']|'')*'|NULL|TRUE|FALSE)"
+    column = r"[A-Za-z_][A-Za-z0-9_]*"
+    patterns = [
+        rf"^{column}\s*(?:<=|>=|<>|!=|=|<|>)\s*{literal}$",
+        rf"^{column}\s+(?:NOT\s+)?IN\s*\(.*\)$",
+        rf"^{column}\s+IS\s+(?:NOT\s+)?NULL$",
+        rf"^(?:char_length|length)\s*\(\s*{column}\s*\)\s*(?:<=|<|=)\s*\d+$",
+        rf"^{column}\s*(?:<=|>=|<>|!=|=|<|>)\s*{column}$",
+        rf"^{column}\s*=\s*\(*\s*{column}\s*[+\-*/]\s*{column}\s*\)*$",
+        rf"^{column}\s*=\s*{column}$",
+    ]
+    return any(re.match(pattern, text, re.IGNORECASE) for pattern in patterns)
+
+
+def _derived_confidence(
+    expression: str, target: str, known_columns: set[str]
+) -> float:
+    lowered = expression.lower()
+    identifiers = _identifiers(expression)
+    if re.search(r"\bselect\b", lowered):
+        return 0.2
+    if target in identifiers:
+        return 0.3
+    if re.search(
+        r"\b(?:now|current_timestamp|current_date|current_time|random|nextval|"
+        r"clock_timestamp|statement_timestamp|transaction_timestamp|"
+        r"gen_random_uuid|uuid_generate_v4)\b",
+        lowered,
+    ):
+        return 0.4
+    called = {
+        name.lower() for name in re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(", expression)
+    }
+    if called - _KNOWN_FUNCTIONS:
+        return 0.6
+    if known_columns and not identifiers <= known_columns:
+        return 0.6
+    if identifiers:
+        return 0.9
+    return 0.85
 
 
 def _compatible(left: Column, right: Column) -> bool:

@@ -47,6 +47,7 @@ class Report:
     command: str = ""
     total_rows: int = 0
     repairs: RepairResult | None = None
+    rules: list[dict[str, Any]] = field(default_factory=list)
 
     def summary(self) -> dict[str, int]:
         return {
@@ -99,6 +100,7 @@ class Report:
                     "sql": result.sql,
                     "error": result.error,
                     "note": result.note,
+                    "provenance": result.provenance,
                     "sample": result.sample,
                 }
                 for result in self.results
@@ -107,6 +109,7 @@ class Report:
             "limitations": self.limitations,
             "reproduce": self.command,
             "repairs": repairs,
+            "rules": self.rules,
         }
 
 
@@ -119,6 +122,7 @@ def build_report(
     command: str = "",
     dataset_hash: str | None = None,
     repairs: RepairResult | None = None,
+    rules: list[dict[str, Any]] | None = None,
 ) -> Report:
     schema_hash = hashlib.sha256(
         json.dumps(catalog.to_dict(), sort_keys=True, ensure_ascii=False).encode()
@@ -143,4 +147,5 @@ def build_report(
         command=command,
         total_rows=sum(table_counts.values()),
         repairs=repairs,
+        rules=rules or [],
     )

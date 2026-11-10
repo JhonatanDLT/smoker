@@ -74,7 +74,7 @@ open proof/report.html
 Expected output:
 
 ```
-pgproof 0.4.1 · 10 tables · 2,000 rows · seed 42
+pgproof 0.5.0 · 10 tables · 2,000 rows · seed 42
   generate billing.accounts        200 rows
   generate billing.plans           200 rows
   ...
@@ -187,6 +187,13 @@ Relationships come from declared foreign keys. When a dump omits them, pgproof
 infers them from `*_id` naming and from `JOIN`s in views, and marks them as
 `inferred`. `LIKE`, `INHERITS`, `ATTACH PARTITION`, CTEs and dynamic SQL are
 expanded or scanned, and every extracted object carries provenance.
+
+Trigger and function bodies are also scanned. A simple guard such as
+`IF NEW.quantity <= 0 THEN RAISE EXCEPTION` becomes the check
+`quantity > 0`, and `NEW.amount := NEW.quantity * NEW.unit_price` becomes the
+derived rule `amount = quantity * unit_price`. Deterministic rules are enforced
+during generation and verified; the rest are reported as lower-confidence
+candidates with their provenance.
 
 ## Repairs
 

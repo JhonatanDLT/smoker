@@ -37,7 +37,7 @@ export PGPROOF_TARGET_DSN=postgresql:///pgproof_demo
 Expected output:
 
 ```
-pgproof 0.4.1 · 10 tables · 2,000 rows · seed 42
+pgproof 0.5.0 · 10 tables · 2,000 rows · seed 42
   generate billing.accounts        200 rows
   ...
 RESULT PASS · 92 passed · 0 failed · 0 errors · 1 skipped · 0 violations

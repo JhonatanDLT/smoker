@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pgproof"
-version = "0.4.1"
+version = "0.5.0"
 description = "Synthetic Postgres data that ships with proof."
 readme = "README.md"
 requires-python = ">=3.11"
