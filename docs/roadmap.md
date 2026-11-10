@@ -44,6 +44,8 @@ The order is deliberate: each phase is funded by the previous one.
 - `pgproof load-dump` for `.sql` files.
 - Tables, columns, constraints, enums, domains, partitions, functions,
   triggers, views and simple unique indexes.
+- `LIKE`, `INHERITS`, `ATTACH PARTITION`, CTE joins and dynamic SQL *(0.4.1)*.
+- Provenance on every extracted object *(0.4.1)*.
 - Inferred foreign keys from naming and view JOINs.
 - `--schema-file` for `plan`, `audit`, `generate`, `verify` and `run`.
 

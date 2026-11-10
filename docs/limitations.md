@@ -74,19 +74,23 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
 ## Dump loading limits
 
 - `COPY ... FROM stdin` data is skipped. Only the schema is loaded.
-- PL/pgSQL and PL/SQL bodies are stored but not parsed. Triggers are
-  inventoried, not replayed.
-- `CREATE RULE`, event triggers and RLS policies are not applied.
-- `CREATE TABLE ... LIKE`, `INHERITS` and `CREATE TABLE ... AS SELECT` are not
-  expanded.
-- Composite types, extensions and custom operators are not modelled.
+- PL/pgSQL and PL/SQL bodies are stored and scanned for dynamic SQL, `IF` and
+  `CASE` conditions, and write/read targets. They are not interpreted; triggers
+  are inventoried, not replayed.
+- `CREATE RULE`, event triggers and RLS policies are stored as raw objects but
+  not applied.
+- `CREATE TABLE ... AS SELECT` is stored raw and not expanded.
+- `CREATE TABLE ... OF <composite type>` is not expanded; the composite type is
+  stored raw.
 - Inferred foreign keys are heuristic. Inspect `ForeignKey.inferred` before
   trusting them; a wrong inference makes the child reference the wrong parent.
-- Trigger `WHEN` clauses and `UPDATE OF` column lists are not captured.
-- Deferrable constraints and `NOT VALID` are not represented in the dump model.
+- Trigger `WHEN` clauses and `UPDATE OF` column lists are captured, but the
+  generator does not evaluate them.
+- `NOT VALID` is captured; deferrable constraints are not.
 - Only simple unique indexes become unique constraints; partial and expression
-  indexes are ignored.
-- `ALTER TABLE ... ATTACH PARTITION` is not processed; use `PARTITION OF`.
+  indexes are stored as raw objects.
+- `ALTER TABLE ... ATTACH PARTITION` is processed; `DETACH PARTITION` and
+  `DETACH PARTITION ... CONCURRENTLY` are not.
 
 ## Distribution and repair limits
 

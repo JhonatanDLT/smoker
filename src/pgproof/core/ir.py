@@ -119,6 +119,7 @@ class ForeignKey:
     parent_columns: list[str]
     on_delete: str | None = None
     inferred: bool = False
+    provenance: Provenance | None = None
 
     @property
     def parent_key(self) -> str:
@@ -130,9 +131,26 @@ class ForeignKey:
 
 
 @dataclass
+class Provenance:
+    kind: str  # dump | function | trigger | view | inferred | catalog
+    source: str
+    detail: str | None = None
+
+
+@dataclass
+class SqlObject:
+    kind: str
+    schema: str | None
+    name: str | None
+    definition: str
+    provenance: Provenance
+
+
+@dataclass
 class UniqueConstraint:
     name: str
     columns: list[str]
+    provenance: Provenance | None = None
 
 
 @dataclass
@@ -141,6 +159,7 @@ class CheckConstraint:
     definition: str
     predicate: str | None = None
     validated: bool = True
+    provenance: Provenance | None = None
 
 
 @dataclass
@@ -152,6 +171,10 @@ class Trigger:
     definition: str
     body: str | None = None
     function_oid: int | None = None
+    when_clause: str | None = None
+    update_of: list[str] = field(default_factory=list)
+    row_level: bool = True
+    provenance: Provenance | None = None
 
 
 @dataclass
@@ -160,6 +183,14 @@ class Function:
     schema: str
     name: str
     body: str
+    kind: str = "function"
+    language: str | None = None
+    returns: str | None = None
+    statements: list[str] = field(default_factory=list)
+    conditions: list[str] = field(default_factory=list)
+    writes: list[str] = field(default_factory=list)
+    reads: list[str] = field(default_factory=list)
+    provenance: Provenance | None = None
 
 
 @dataclass
@@ -219,6 +250,7 @@ class Table:
     partition_strategy: str | None = None
     partition_key: list[str] = field(default_factory=list)
     partitions: list[Partition] = field(default_factory=list)
+    provenance: Provenance | None = None
 
     @property
     def key(self) -> str:
@@ -235,6 +267,16 @@ class Table:
         raise KeyError(f"{self.key} has no column {name!r}")
 
 
+def _provenance(raw: dict[str, Any] | None) -> Provenance | None:
+    if not raw:
+        return None
+    return Provenance(
+        kind=raw.get("kind", "dump"),
+        source=raw.get("source", ""),
+        detail=raw.get("detail"),
+    )
+
+
 @dataclass
 class Catalog:
     database: str
@@ -242,6 +284,7 @@ class Catalog:
     tables: list[Table] = field(default_factory=list)
     schemas: list[str] = field(default_factory=list)
     functions: list[Function] = field(default_factory=list)
+    objects: list[SqlObject] = field(default_factory=list)
 
     def table(self, key: str) -> Table:
         for table in self.tables:
@@ -269,10 +312,42 @@ class Catalog:
         tables = []
         for raw in data.get("tables", []):
             columns = [Column(**{**c, "data_kind": DataKind(c["data_kind"]) if c.get("data_kind") else None}) for c in raw.get("columns", [])]
-            foreign_keys = [ForeignKey(**fk) for fk in raw.get("foreign_keys", [])]
-            uniques = [UniqueConstraint(**u) for u in raw.get("uniques", [])]
-            checks = [CheckConstraint(**c) for c in raw.get("checks", [])]
-            triggers = [Trigger(**t) for t in raw.get("triggers", [])]
+            foreign_keys = [
+                ForeignKey(
+                    **{
+                        **fk,
+                        "provenance": _provenance(fk.get("provenance")),
+                    }
+                )
+                for fk in raw.get("foreign_keys", [])
+            ]
+            uniques = [
+                UniqueConstraint(
+                    **{
+                        **unique,
+                        "provenance": _provenance(unique.get("provenance")),
+                    }
+                )
+                for unique in raw.get("uniques", [])
+            ]
+            checks = [
+                CheckConstraint(
+                    **{
+                        **check,
+                        "provenance": _provenance(check.get("provenance")),
+                    }
+                )
+                for check in raw.get("checks", [])
+            ]
+            triggers = [
+                Trigger(
+                    **{
+                        **trigger,
+                        "provenance": _provenance(trigger.get("provenance")),
+                    }
+                )
+                for trigger in raw.get("triggers", [])
+            ]
             partitions = [Partition.from_dict(p) for p in raw.get("partitions", [])]
             tables.append(
                 Table(
@@ -291,6 +366,7 @@ class Catalog:
                     partition_strategy=raw.get("partition_strategy"),
                     partition_key=raw.get("partition_key", []),
                     partitions=partitions,
+                    provenance=_provenance(raw.get("provenance")),
                 )
             )
             _restore_partition_values(tables[-1])
@@ -299,7 +375,25 @@ class Catalog:
             server_version=data.get("server_version", ""),
             tables=tables,
             schemas=data.get("schemas", []),
-            functions=[Function(**function) for function in data.get("functions", [])],
+            functions=[
+                Function(
+                    **{
+                        **function,
+                        "provenance": _provenance(function.get("provenance")),
+                    }
+                )
+                for function in data.get("functions", [])
+            ],
+            objects=[
+                SqlObject(
+                    kind=obj.get("kind", "object"),
+                    schema=obj.get("schema"),
+                    name=obj.get("name"),
+                    definition=obj.get("definition", ""),
+                    provenance=_provenance(obj.get("provenance")) or Provenance("dump", ""),
+                )
+                for obj in data.get("objects", [])
+            ],
         )
 
 

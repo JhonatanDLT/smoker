@@ -48,4 +48,5 @@ def filter_catalog(
         tables=tables,
         schemas=sorted({table.schema for table in tables}),
         functions=catalog.functions,
+        objects=catalog.objects,
     )

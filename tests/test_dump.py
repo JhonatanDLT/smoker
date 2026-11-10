@@ -104,6 +104,139 @@ def test_inferred_foreign_key_from_naming() -> None:
     assert foreign_key.inferred is True
     assert foreign_key.parent_table == "customers"
     assert foreign_key.child_columns == ["customer_id"]
+    assert foreign_key.provenance is not None
+    assert foreign_key.provenance.kind == "inferred"
+
+
+def test_like_and_inherits() -> None:
+    dump = """
+    CREATE TABLE base (
+        id integer PRIMARY KEY,
+        name text,
+        created_at timestamptz DEFAULT now(),
+        CONSTRAINT base_name_check CHECK (length(name) > 0)
+    );
+    CREATE TABLE child (LIKE base INCLUDING ALL);
+    CREATE TABLE inherited (extra integer) INHERITS (base);
+    """
+    catalog = DumpLoader().load(dump)
+
+    child = catalog.table("public.child")
+    assert [column.name for column in child.columns] == ["id", "name", "created_at"]
+    assert child.primary_key == ["id"]
+    assert child.column("created_at").default is not None
+    assert len(child.checks) == 1
+
+    inherited = catalog.table("public.inherited")
+    assert [column.name for column in inherited.columns] == [
+        "extra",
+        "id",
+        "name",
+        "created_at",
+    ]
+    assert inherited.primary_key == []
+    assert len(inherited.checks) == 1
+
+
+def test_attach_partition() -> None:
+    dump = """
+    CREATE TABLE parent (
+        id integer,
+        created_at date,
+        PRIMARY KEY (id, created_at)
+    ) PARTITION BY RANGE (created_at);
+    CREATE TABLE standalone (
+        id integer,
+        created_at date,
+        PRIMARY KEY (id, created_at)
+    );
+    ALTER TABLE parent ATTACH PARTITION standalone
+        FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');
+    """
+    catalog = DumpLoader().load(dump)
+
+    assert [table.key for table in catalog.tables] == ["public.parent"]
+    parent = catalog.table("public.parent")
+    assert len(parent.partitions) == 1
+    assert parent.partitions[0].name == "standalone"
+    assert parent.partitions[0].lower == [date(2025, 1, 1)]
+
+
+def test_cte_join_inference() -> None:
+    dump = """
+    CREATE TABLE customers (id integer PRIMARY KEY);
+    CREATE TABLE orders (id integer PRIMARY KEY, customer_id integer NOT NULL);
+    CREATE VIEW v AS
+    WITH x AS (
+        SELECT c.id, o.customer_id
+        FROM customers c
+        JOIN orders o ON o.customer_id = c.id
+    )
+    SELECT * FROM x;
+    """
+    catalog = DumpLoader().load(dump)
+    orders = catalog.table("public.orders")
+
+    assert any(
+        foreign_key.parent_table == "customers" and foreign_key.inferred
+        for foreign_key in orders.foreign_keys
+    )
+
+
+def test_function_dynamic_sql_conditions_and_writes() -> None:
+    dump = """
+    CREATE TABLE events (id integer PRIMARY KEY, amount numeric);
+    CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$
+    BEGIN
+        IF NEW.amount < 0 THEN
+            RAISE EXCEPTION 'negative';
+        END IF;
+        EXECUTE 'UPDATE events SET amount = 1 WHERE id = 2';
+    END;
+    $$;
+    """
+    catalog = DumpLoader().load(dump)
+    function = catalog.functions[0]
+
+    assert function.language == "plpgsql"
+    assert any("NEW.amount" in condition for condition in function.conditions)
+    assert any("UPDATE events" in statement for statement in function.statements)
+    assert "events" in function.writes
+    assert function.provenance is not None
+
+
+def test_trigger_when_and_update_of() -> None:
+    dump = """
+    CREATE TABLE t (id integer, updated_at timestamptz);
+    CREATE FUNCTION touch() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN RETURN NEW; END;
+    $$;
+    CREATE TRIGGER t_touch BEFORE UPDATE OF updated_at ON t
+        FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*)
+        EXECUTE FUNCTION touch();
+    """
+    catalog = DumpLoader().load(dump)
+    trigger = catalog.table("public.t").triggers[0]
+
+    assert trigger.update_of == ["updated_at"]
+    assert "OLD.*" in (trigger.when_clause or "")
+    assert trigger.row_level is True
+    assert trigger.provenance is not None
+
+
+def test_raw_objects_are_stored() -> None:
+    dump = """
+    CREATE VIEW v AS SELECT 1;
+    CREATE RULE r AS ON INSERT TO t DO INSTEAD NOTHING;
+    CREATE POLICY p ON t USING (true);
+    CREATE SEQUENCE s;
+    CREATE EXTENSION pgcrypto;
+    """
+    catalog = DumpLoader().load(dump)
+    kinds = {obj.kind for obj in catalog.objects}
+
+    assert {"view", "rule", "policy", "sequence", "extension"} <= kinds
+    assert all(obj.provenance is not None for obj in catalog.objects)
 
 
 @pytest.mark.integration

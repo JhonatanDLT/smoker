@@ -277,11 +277,22 @@ A certificate that hides its gaps is worse than no certificate.
 - Regular expressions handle `CREATE FUNCTION`, `CREATE PROCEDURE`,
   `CREATE TRIGGER` and `CREATE DOMAIN`, whose procedural bodies are not part of
   the DDL grammar.
-- A post-processing pass builds the partition tree and infers relationships.
+- `LIKE ... INCLUDING ...` copies columns, defaults and constraints from the
+  source table. `INHERITS` copies columns and CHECK constraints, but not
+  primary keys, unique constraints or foreign keys.
+- `ALTER TABLE ... ATTACH PARTITION` joins a standalone table to a partition
+  tree.
+- A post-processing pass builds the partition tree, infers relationships from
+  `*_id` naming and from `JOIN` nodes (including CTEs), and analyses function
+  bodies for dynamic SQL, `IF`/`CASE` conditions and write/read targets.
 
-Relationships come from declared foreign keys. Missing ones are inferred from
-`*_id` naming and from `JOIN` conditions in views; inferred keys carry
-`ForeignKey.inferred = True`.
+Relationships come from declared foreign keys. Missing ones are inferred and
+carry `ForeignKey.inferred = True`.
+
+Every table, constraint, foreign key, function, trigger and raw object carries
+a `Provenance` (`dump`, `inferred`, `function`, `view`, `inherited`). Raw
+objects (views, materialized views, rules, policies, sequences, extensions,
+composite types and non-unique indexes) are stored in `Catalog.objects`.
 
 Functions are stored once in `Catalog.functions`; triggers reference them by
 name. In a dump there are no OIDs, so the loader assigns synthetic ones.

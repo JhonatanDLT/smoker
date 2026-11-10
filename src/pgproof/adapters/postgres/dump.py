@@ -1,15 +1,20 @@
 """Load a PostgreSQL schema dump into the domain Catalog.
 
 The dump is the source of truth when there is no live database: tables,
-columns, constraints, enums, domains, partitions, functions, triggers, views
-and indexes. Generation uses the same Catalog as the live introspection path,
-so relationships, checks and partitions behave identically.
+columns, constraints, enums, domains, partitions, functions, triggers, views,
+rules, policies, sequences and indexes. Generation uses the same Catalog as the
+live introspection path, so relationships, checks and partitions behave
+identically.
+
+Every extracted object carries a ``Provenance`` so the caller can decide the
+creation and insertion order later.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +29,8 @@ from ...core.ir import (
     ForeignKey,
     Function,
     Partition,
+    Provenance,
+    SqlObject,
     Table,
     Trigger,
     UniqueConstraint,
@@ -183,6 +190,10 @@ def split_statements(sql: str) -> list[str]:
     return statements
 
 
+def _statement_head(statement: str) -> str:
+    return statement.lstrip().upper()
+
+
 class DumpLoader:
     def __init__(self) -> None:
         self.tables: dict[str, Table] = {}
@@ -192,8 +203,12 @@ class DumpLoader:
         self.function_by_name: dict[str, Function] = {}
         self.trigger_specs: list[dict[str, Any]] = []
         self.views: list[str] = []
+        self.objects: list[SqlObject] = []
         self.partition_relations: list[dict[str, Any]] = []
+        self.attach_relations: list[dict[str, Any]] = []
         self.partition_specs: dict[str, tuple[str, list[str]]] = {}
+        self.like_specs: list[dict[str, Any]] = []
+        self.inherits_specs: list[dict[str, Any]] = []
         self.search_path: list[str] = ["public"]
         self.schemas: set[str] = {"public"}
         self.database = "dump"
@@ -206,19 +221,23 @@ class DumpLoader:
             except Exception as exc:  # noqa: BLE001 - one bad statement must not drop the dump
                 logger.warning("skipping unparseable statement: %s", exc)
                 continue
+
+        self._resolve_like_and_inherits()
         self._attach_triggers()
         self._build_partitions()
         self._infer_relationships()
+        self._analyze_functions()
         return Catalog(
             database=self.database,
             server_version="dump",
             tables=sorted(self.tables.values(), key=lambda table: table.key),
             schemas=sorted({table.schema for table in self.tables.values()}),
             functions=self.functions,
+            objects=self.objects,
         )
 
     def _statement(self, statement: str) -> None:
-        head = statement.lstrip().upper()
+        head = _statement_head(statement)
         if head.startswith("SET "):
             self._set(statement)
         elif head.startswith("CREATE SCHEMA"):
@@ -244,8 +263,58 @@ class DumpLoader:
             self._create_function(statement)
         elif head.startswith(("CREATE TRIGGER", "CREATE OR REPLACE TRIGGER")):
             self._create_trigger(statement)
-        elif head.startswith(("CREATE VIEW", "CREATE MATERIALIZED VIEW")):
-            self.views.append(statement)
+        elif head.startswith("CREATE MATERIALIZED VIEW"):
+            self._create_view(statement, materialized=True)
+        elif head.startswith(("CREATE VIEW", "CREATE OR REPLACE VIEW")):
+            self._create_view(statement)
+        elif head.startswith("CREATE RULE"):
+            self._store_object("rule", statement)
+        elif head.startswith("CREATE POLICY"):
+            self._store_object("policy", statement)
+        elif head.startswith("CREATE SEQUENCE"):
+            self._store_object("sequence", statement)
+        elif head.startswith("CREATE EXTENSION"):
+            self._store_object("extension", statement)
+        elif head.startswith("CREATE FOREIGN TABLE"):
+            self._store_object("foreign_table", statement)
+        elif head.startswith("ALTER SEQUENCE"):
+            self._store_object("sequence_alter", statement)
+        elif head.startswith("COMMENT ON"):
+            self._store_object("comment", statement)
+        elif head.startswith(("GRANT", "REVOKE")):
+            self._store_object("grant", statement)
+
+    def _prov(self, kind: str, source: str, detail: str | None = None) -> Provenance:
+        first = source.splitlines()[0].strip() if source else ""
+        return Provenance(kind=kind, source=first[:200], detail=detail)
+
+    def _store_object(self, kind: str, statement: str) -> None:
+        patterns = {
+            "view": rf"CREATE{_WS}(?:OR{_WS}REPLACE{_WS})?(?:MATERIALIZED{_WS})?VIEW{_WS}({_QUALIFIED})",
+            "materialized_view": rf"CREATE{_WS}MATERIALIZED{_WS}VIEW{_WS}({_QUALIFIED})",
+            "rule": rf"CREATE{_WS}(?:OR{_WS}REPLACE{_WS})?RULE{_WS}({_QUALIFIED})",
+            "policy": rf"CREATE{_WS}POLICY{_WS}({_QUALIFIED})",
+            "sequence": rf"CREATE{_WS}SEQUENCE{_WS}({_QUALIFIED})",
+            "extension": rf"CREATE{_WS}EXTENSION{_WS}({_IDENT})",
+            "type": rf"CREATE{_WS}TYPE{_WS}({_QUALIFIED})",
+            "index": rf"CREATE{_WS}(?:UNIQUE{_WS})?INDEX{_WS}({_QUALIFIED})",
+            "foreign_table": rf"CREATE{_WS}FOREIGN{_WS}TABLE{_WS}({_QUALIFIED})",
+        }
+        schema = name = None
+        pattern = patterns.get(kind)
+        if pattern:
+            match = re.search(pattern, statement, re.IGNORECASE | re.DOTALL)
+            if match:
+                schema, name = self._qualified(match.group(1))
+        self.objects.append(
+            SqlObject(
+                kind=kind,
+                schema=schema,
+                name=name,
+                definition=statement,
+                provenance=self._prov("dump", statement, kind),
+            )
+        )
 
     # ----------------------------------------------------------------- basics
     def _qualified(self, name: str, default_schema: str | None = None) -> tuple[str, str]:
@@ -273,25 +342,30 @@ class DumpLoader:
             self.search_path = paths
 
     def _create_schema(self, statement: str) -> None:
-        match = re.search(rf"CREATE{_WS}SCHEMA{_WS}(?:IF{_WS}NOT{_WS}EXISTS{_WS})?({_IDENT})", statement, re.IGNORECASE)
+        match = re.search(
+            rf"CREATE{_WS}SCHEMA{_WS}(?:IF{_WS}NOT{_WS}EXISTS{_WS})?({_IDENT})",
+            statement,
+            re.IGNORECASE,
+        )
         if match:
             self.schemas.add(_unquote(match.group(1)))
 
     def _create_type(self, statement: str) -> None:
-        match = re.search(
+        enum_match = re.search(
             rf"CREATE{_WS}TYPE{_WS}({_QUALIFIED}){_WS}AS{_WS}ENUM{_WS}\((.*)\)",
             statement,
             re.IGNORECASE | re.DOTALL,
         )
-        if not match:
+        if enum_match:
+            schema, name = self._qualified(enum_match.group(1))
+            values = [
+                value.replace("''", "'")
+                for value in re.findall(r"'((?:[^']|'')*)'", enum_match.group(2))
+            ]
+            self.enums[f"{schema}.{name}"] = values
+            self.enums.setdefault(name, values)
             return
-        schema, name = self._qualified(match.group(1))
-        values = [
-            value.replace("''", "'")
-            for value in re.findall(r"'((?:[^']|'')*)'", match.group(2))
-        ]
-        self.enums[f"{schema}.{name}"] = values
-        self.enums.setdefault(name, values)
+        self._store_object("type", statement)
 
     def _create_domain(self, statement: str) -> None:
         match = re.match(
@@ -339,6 +413,7 @@ class DumpLoader:
             return
         schema_expr = tree.this
         if not isinstance(schema_expr, exp.Schema):
+            self._store_object("table", statement)
             return
         table_expr = schema_expr.this
         if not isinstance(table_expr, exp.Table):
@@ -346,7 +421,11 @@ class DumpLoader:
         schema = table_expr.db or self.search_path[0]
         name = table_expr.name
         key = self._table_key(schema, name)
-        table = Table(schema=schema, name=name)
+        table = Table(
+            schema=schema,
+            name=name,
+            provenance=self._prov("dump", statement, "table"),
+        )
 
         partition_spec = self._partition_spec(statement)
         if partition_spec:
@@ -358,16 +437,57 @@ class DumpLoader:
 
         for node in schema_expr.expressions:
             if isinstance(node, exp.ColumnDef):
-                self._add_column(table, node)
+                self._add_column(table, node, statement)
+            elif isinstance(node, exp.LikeProperty):
+                self._record_like(table, node, statement)
             elif isinstance(node, exp.Constraint):
                 for sub in node.expressions:
-                    self._apply_constraint(table, node.name, sub)
-            elif isinstance(node, (exp.PrimaryKey, exp.ForeignKey, exp.UniqueColumnConstraint, exp.CheckColumnConstraint)):
-                self._apply_constraint(table, None, node)
+                    self._apply_constraint(table, node.name, sub, statement)
+            elif isinstance(
+                node,
+                (
+                    exp.PrimaryKey,
+                    exp.ForeignKey,
+                    exp.UniqueColumnConstraint,
+                    exp.CheckColumnConstraint,
+                ),
+            ):
+                self._apply_constraint(table, None, node, statement)
+
+        for prop in tree.find_all(exp.InheritsProperty):
+            for parent in prop.expressions:
+                if isinstance(parent, exp.Table):
+                    parent_schema = parent.db or schema
+                    self.inherits_specs.append(
+                        {
+                            "child_key": key,
+                            "parent_key": self._table_key(parent_schema, parent.name),
+                            "statement": statement,
+                        }
+                    )
 
         self.tables[key] = table
 
-    def _add_column(self, table: Table, node: Any) -> None:
+    def _record_like(self, table: Table, node: Any, statement: str) -> None:
+        parent = node.this
+        if not isinstance(parent, exp.Table):
+            return
+        options: list[str] = []
+        for prop in node.args.get("expressions") or []:
+            value = prop.args.get("value")
+            option = value.name if hasattr(value, "name") else str(value)
+            options.append(option.upper())
+        parent_schema = parent.db or table.schema
+        self.like_specs.append(
+            {
+                "child_key": table.key,
+                "parent_key": self._table_key(parent_schema, parent.name),
+                "options": options,
+                "statement": statement,
+            }
+        )
+
+    def _add_column(self, table: Table, node: Any, statement: str) -> None:
         name = node.name
         kind = node.args.get("kind")
         sql_type = kind.sql(dialect="postgres") if kind is not None else "text"
@@ -402,6 +522,7 @@ class DumpLoader:
                     UniqueConstraint(
                         name=f"{table.name}_{name}_key",
                         columns=[name],
+                        provenance=self._prov("dump", statement, "unique"),
                     )
                 )
             elif isinstance(constraint_kind, exp.Reference):
@@ -410,6 +531,7 @@ class DumpLoader:
                     f"{table.name}_{name}_fkey",
                     [name],
                     constraint_kind,
+                    self._prov("dump", statement, "foreign_key"),
                 )
             elif isinstance(constraint_kind, exp.CheckColumnConstraint):
                 predicate = constraint_kind.this.sql(dialect="postgres")
@@ -418,6 +540,7 @@ class DumpLoader:
                         name=f"{table.name}_{name}_check",
                         definition=f"CHECK ({predicate})",
                         predicate=predicate,
+                        provenance=self._prov("dump", statement, "check"),
                     )
                 )
         table.columns.append(column)
@@ -428,10 +551,19 @@ class DumpLoader:
                     name=f"{table.name}_{name}_domain",
                     definition=f"CHECK ({predicate})",
                     predicate=predicate,
+                    provenance=self._prov("dump", statement, "domain"),
                 )
             )
 
-    def _apply_constraint(self, table: Table, name: str | None, node: Any) -> None:
+    def _apply_constraint(
+        self,
+        table: Table,
+        name: str | None,
+        node: Any,
+        statement: str,
+        validated: bool = True,
+    ) -> None:
+        provenance = self._prov("dump", statement, "constraint")
         if isinstance(node, exp.PrimaryKey):
             table.primary_key = [item.name for item in node.expressions]
             for column in table.primary_key:
@@ -449,6 +581,7 @@ class DumpLoader:
                 UniqueConstraint(
                     name=name or f"{table.name}_{columns[0]}_key",
                     columns=columns,
+                    provenance=provenance,
                 )
             )
         elif isinstance(node, exp.CheckColumnConstraint):
@@ -458,6 +591,8 @@ class DumpLoader:
                     name=name or f"{table.name}_check_{len(table.checks) + 1}",
                     definition=f"CHECK ({predicate})",
                     predicate=predicate,
+                    validated=validated,
+                    provenance=provenance,
                 )
             )
         elif isinstance(node, exp.ForeignKey):
@@ -469,6 +604,7 @@ class DumpLoader:
                     name or f"{table.name}_{columns[0]}_fkey",
                     columns,
                     reference,
+                    provenance,
                 )
 
     def _add_foreign_key(
@@ -477,6 +613,7 @@ class DumpLoader:
         name: str,
         child_columns: list[str],
         reference: Any,
+        provenance: Provenance,
     ) -> None:
         ref_schema = reference.this
         if not isinstance(ref_schema, exp.Schema):
@@ -502,12 +639,17 @@ class DumpLoader:
                 parent_table=parent_expr.name,
                 parent_columns=parent_columns,
                 on_delete=on_delete,
+                provenance=provenance,
             )
         )
 
     def _alter_table(self, statement: str) -> None:
+        if self._alter_attach_partition(statement):
+            return
+
         tree = sqlglot.parse_one(statement, read="postgres")
         if not isinstance(tree, exp.Alter):
+            self._store_object("alter_table", statement)
             return
         table_expr = tree.this
         if not isinstance(table_expr, exp.Table):
@@ -516,14 +658,20 @@ class DumpLoader:
         table = self.tables.get(self._table_key(schema, table_expr.name))
         if table is None:
             return
+
+        not_valid = "NOT VALID" in statement.upper()
         for action in tree.args.get("actions") or []:
             if isinstance(action, exp.AddConstraint):
                 for node in action.expressions:
                     if isinstance(node, exp.Constraint):
                         for sub in node.expressions:
-                            self._apply_constraint(table, node.name, sub)
+                            self._apply_constraint(
+                                table, node.name, sub, statement, validated=not not_valid
+                            )
                     else:
-                        self._apply_constraint(table, None, node)
+                        self._apply_constraint(
+                            table, None, node, statement, validated=not not_valid
+                        )
             elif isinstance(action, exp.AlterColumn):
                 name = action.this.name if action.this is not None else None
                 if not name:
@@ -536,7 +684,53 @@ class DumpLoader:
                 if default is not None:
                     column.default = default.sql(dialect="postgres")
 
+        for match in re.finditer(
+            rf"ALTER{_WS}COLUMN{_WS}({_IDENT}){_WS}SET{_WS}NOT{_WS}NULL",
+            statement,
+            re.IGNORECASE,
+        ):
+            try:
+                table.column(_unquote(match.group(1))).nullable = False
+            except KeyError:
+                pass
+        for match in re.finditer(
+            rf"ALTER{_WS}COLUMN{_WS}({_IDENT}){_WS}DROP{_WS}NOT{_WS}NULL",
+            statement,
+            re.IGNORECASE,
+        ):
+            try:
+                table.column(_unquote(match.group(1))).nullable = True
+            except KeyError:
+                pass
+        if "ENABLE ROW LEVEL SECURITY" in statement.upper() or "FORCE ROW LEVEL SECURITY" in statement.upper():
+            self._store_object("policy_rls", statement)
+
+    def _alter_attach_partition(self, statement: str) -> bool:
+        match = re.search(
+            rf"ALTER{_WS}TABLE{_WS}(?:ONLY{_WS})?({_QUALIFIED}){_WS}ATTACH{_WS}PARTITION{_WS}"
+            rf"({_QUALIFIED}){_WS}(FOR{_WS}VALUES{_WS}.*?|DEFAULT)\s*$",
+            statement,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if not match:
+            return False
+        parent_schema, parent_name = self._qualified(match.group(1))
+        child_schema, child_name = self._qualified(match.group(2), parent_schema)
+        bound = " ".join(match.group(3).split())
+        child_key = self._table_key(child_schema, child_name)
+        self.attach_relations.append(
+            {
+                "parent": self._table_key(parent_schema, parent_name),
+                "child_schema": child_schema,
+                "child_name": child_name,
+                "bound": bound,
+            }
+        )
+        self.tables.pop(child_key, None)
+        return True
+
     def _create_index(self, statement: str) -> None:
+        self._store_object("index", statement)
         tree = sqlglot.parse_one(statement, read="postgres")
         if not isinstance(tree, exp.Create) or tree.kind != "INDEX":
             return
@@ -565,8 +759,57 @@ class DumpLoader:
                 UniqueConstraint(
                     name=index.name or f"{table.name}_{columns[0]}_key",
                     columns=columns,
+                    provenance=self._prov("dump", statement, "unique_index"),
                 )
             )
+
+    # ---------------------------------------------------------- like/inherits
+    def _resolve_like_and_inherits(self) -> None:
+        specs: list[dict[str, Any]] = list(self.like_specs) + list(self.inherits_specs)
+        for _ in range(len(specs) + 1):
+            pending: list[dict[str, Any]] = []
+            for spec in specs:
+                child = self.tables.get(spec["child_key"])
+                parent = self.tables.get(spec["parent_key"])
+                if child is None or parent is None:
+                    pending.append(spec)
+                    continue
+                is_like = spec in self.like_specs
+                options = {option.upper() for option in spec.get("options", [])}
+                including_all = "ALL" in options
+                including_constraints = including_all or "CONSTRAINTS" in options
+                including_defaults = including_all or "DEFAULTS" in options
+                existing = {column.name for column in child.columns}
+                for column in parent.columns:
+                    if column.name in existing:
+                        continue
+                    copied = deepcopy(column)
+                    if not including_defaults:
+                        copied.default = None
+                    child.columns.append(copied)
+                if is_like and including_constraints:
+                    child.primary_key = list(parent.primary_key)
+                    child.uniques.extend(deepcopy(parent.uniques))
+                    child.checks.extend(deepcopy(parent.checks))
+                    child.foreign_keys.extend(deepcopy(parent.foreign_keys))
+                if not is_like:
+                    child.checks.extend(
+                        CheckConstraint(
+                            name=check.name,
+                            definition=check.definition,
+                            predicate=check.predicate,
+                            validated=check.validated,
+                            provenance=Provenance(
+                                kind="inherited",
+                                source=parent.key,
+                                detail=check.name,
+                            ),
+                        )
+                        for check in parent.checks
+                    )
+            if not pending:
+                return
+            specs = pending
 
     # ---------------------------------------------------------- partitions
     def _partition_spec(self, statement: str) -> tuple[str, list[str]] | None:
@@ -614,7 +857,8 @@ class DumpLoader:
         )
 
     def _build_partitions(self) -> None:
-        if not self.partition_relations:
+        relations = list(self.partition_relations) + list(self.attach_relations)
+        if not relations:
             return
         for key, (strategy, columns) in self.partition_specs.items():
             table = self.tables.get(key)
@@ -623,9 +867,11 @@ class DumpLoader:
                 table.partition_strategy = strategy
                 table.partition_key = columns
 
-        parent_of = {relation["child_key"]: relation["parent"] for relation in self.partition_relations if "child_key" in relation}
-        for relation in self.partition_relations:
-            parent_of[self._table_key(relation["child_schema"], relation["child_name"])] = relation["parent"]
+        parent_of: dict[str, str] = {}
+        for relation in relations:
+            parent_of[self._table_key(relation["child_schema"], relation["child_name"])] = relation[
+                "parent"
+            ]
 
         def root_of(key: str) -> str | None:
             seen: set[str] = set()
@@ -638,7 +884,7 @@ class DumpLoader:
             return current
 
         nodes: dict[str, Partition] = {}
-        for relation in self.partition_relations:
+        for relation in relations:
             parent_key = relation["parent"]
             child_key = self._table_key(relation["child_schema"], relation["child_name"])
             _strategy, key_columns = self.partition_specs.get(parent_key, ("", []))
@@ -679,14 +925,27 @@ class DumpLoader:
         )
         if not head:
             return
+        kind = head.group(1).lower()
         schema, name = self._qualified(head.group(2))
         body_match = re.search(r"\bAS\s+(\$[A-Za-z_0-9]*\$)(.*?)\1", statement, re.DOTALL)
         body = body_match.group(2).strip() if body_match else ""
+        language_match = re.search(r"\bLANGUAGE\s+([\w]+)", statement, re.IGNORECASE)
+        language = language_match.group(1) if language_match else None
+        returns_match = re.search(
+            r"\bRETURNS\s+(.+?)\s+(?:LANGUAGE|AS|IMMUTABLE|STABLE|VOLATILE|SECURITY|SET|$)",
+            statement,
+            re.IGNORECASE | re.DOTALL,
+        )
+        returns = " ".join(returns_match.group(1).split()) if returns_match else None
         function = Function(
             oid=len(self.functions) + 1,
             schema=schema,
             name=name,
             body=body,
+            kind=kind,
+            language=language,
+            returns=returns,
+            provenance=self._prov("dump", statement, kind),
         )
         self.functions.append(function)
         self.function_by_name[f"{schema}.{name}"] = function
@@ -707,6 +966,16 @@ class DumpLoader:
         events = " ".join(match.group(3).split())
         table_schema, table_name = self._qualified(match.group(4))
         function_schema, function_name = self._qualified(match.group(6))
+        when_match = re.search(r"\bWHEN\s*\((.*?)\)\s*EXECUTE", statement, re.IGNORECASE | re.DOTALL)
+        when_clause = " ".join(when_match.group(1).split()) if when_match else None
+        update_of: list[str] = []
+        update_match = re.search(r"UPDATE\s+OF\s+([\w\s,\"]+?)\s+ON", statement, re.IGNORECASE)
+        if update_match:
+            update_of = [
+                _unquote(item.strip())
+                for item in update_match.group(1).split(",")
+                if item.strip()
+            ]
         self.trigger_specs.append(
             {
                 "name": name,
@@ -716,6 +985,9 @@ class DumpLoader:
                 "function_name": function_name,
                 "function_key": f"{function_schema}.{function_name}",
                 "definition": statement,
+                "when_clause": when_clause,
+                "update_of": update_of,
+                "row_level": "FOR EACH STATEMENT" not in statement.upper(),
             }
         )
 
@@ -724,9 +996,9 @@ class DumpLoader:
             table = self.tables.get(spec["table_key"])
             if table is None:
                 continue
-            function = self.function_by_name.get(spec["function_key"]) or self.function_by_name.get(
-                spec["function_name"]
-            )
+            function = self.function_by_name.get(
+                spec["function_key"]
+            ) or self.function_by_name.get(spec["function_name"])
             table.triggers.append(
                 Trigger(
                     name=spec["name"],
@@ -735,13 +1007,64 @@ class DumpLoader:
                     function=spec["function_name"],
                     definition=spec["definition"],
                     function_oid=function.oid if function else None,
+                    when_clause=spec.get("when_clause"),
+                    update_of=spec.get("update_of", []),
+                    row_level=spec.get("row_level", True),
+                    provenance=self._prov("dump", spec["definition"], "trigger"),
                 )
             )
 
+    def _analyze_functions(self) -> None:
+        for function in self.functions:
+            body = function.body or ""
+            function.statements = self._extract_sql_strings(body)
+            function.conditions = self._extract_conditions(body)
+            function.writes = sorted(
+                {
+                    _unquote(match.group(2))
+                    for match in re.finditer(
+                        rf"\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+({_QUALIFIED})",
+                        body,
+                        re.IGNORECASE,
+                    )
+                }
+            )
+            function.reads = sorted(
+                {
+                    _unquote(match.group(1))
+                    for match in re.finditer(rf"\bFROM\s+({_QUALIFIED})", body, re.IGNORECASE)
+                }
+            )
+            for statement in function.statements:
+                try:
+                    tree = sqlglot.parse_one(statement, read="postgres")
+                except Exception as exc:  # noqa: BLE001 - dynamic SQL is best effort
+                    logger.debug("skipping dynamic SQL: %s", exc)
+                    continue
+                self._infer_joins_from_query(tree, Provenance("function", f"{function.schema}.{function.name}"))
+
+    def _extract_sql_strings(self, body: str) -> list[str]:
+        statements: list[str] = []
+        for match in re.finditer(
+            r"EXECUTE\s+(?:FORMAT\s*\(\s*)?'((?:[^']|'')*)'", body, re.IGNORECASE | re.DOTALL
+        ):
+            statements.append(match.group(1).replace("''", "'"))
+        for match in re.finditer(
+            r"EXECUTE\s+(?:FORMAT\s*\(\s*)?(\$[A-Za-z_0-9]*\$)(.*?)\1", body, re.IGNORECASE | re.DOTALL
+        ):
+            statements.append(match.group(2).strip())
+        return statements
+
+    def _extract_conditions(self, body: str) -> list[str]:
+        conditions: list[str] = []
+        for match in re.finditer(r"\bIF\s+(.+?)\s+THEN\b", body, re.IGNORECASE | re.DOTALL):
+            conditions.append(" ".join(match.group(1).split()))
+        for match in re.finditer(r"\bWHEN\s+(.+?)\s+THEN\b", body, re.IGNORECASE | re.DOTALL):
+            conditions.append(" ".join(match.group(1).split()))
+        return conditions
+
     # --------------------------------------------------------- relationships
     def _infer_relationships(self) -> None:
-        for view in self.views:
-            self._infer_from_view(view)
         for table in list(self.tables.values()):
             for column in table.columns:
                 if not column.name.endswith("_id"):
@@ -762,6 +1085,7 @@ class DumpLoader:
                         parent_table=parent_table.name,
                         parent_columns=[parent_column],
                         inferred=True,
+                        provenance=Provenance("inferred", "naming", f"{table.key}.{column.name}"),
                     )
                 )
 
@@ -784,28 +1108,52 @@ class DumpLoader:
                 return candidate, parent_column
         return None
 
-    def _infer_from_view(self, statement: str) -> None:
-        pattern = re.compile(
-            rf"JOIN{_WS}({_QUALIFIED}){_WS}(?:{_IDENT}{_WS})?ON{_WS}"
-            rf"({_QUALIFIED})\.({_IDENT}){_WS}={_WS}({_QUALIFIED})\.({_IDENT})",
-            re.IGNORECASE | re.DOTALL,
-        )
-        for match in pattern.finditer(statement):
-            left_schema, left_table = self._qualified(match.group(2))
-            right_schema, right_table = self._qualified(match.group(4))
-            left = self.tables.get(self._table_key(left_schema, left_table))
-            right = self.tables.get(self._table_key(right_schema, right_table))
+    def _infer_joins_from_query(self, query: Any, provenance: Provenance) -> None:
+        aliases: dict[str, tuple[str, str]] = {}
+        for table in query.find_all(exp.Table):
+            schema = table.db or self.search_path[0]
+            aliases[table.alias_or_name] = (schema, table.name)
+            aliases[f"{schema}.{table.name}"] = (schema, table.name)
+        for join in query.find_all(exp.Join):
+            on = join.args.get("on")
+            if not isinstance(on, exp.EQ):
+                continue
+            left = on.this if isinstance(on.this, exp.Column) else None
+            right = on.expression if isinstance(on.expression, exp.Column) else None
             if left is None or right is None:
                 continue
-            left_column = _unquote(match.group(3))
-            right_column = _unquote(match.group(5))
-            if left_column in left.primary_key and right_column not in right.primary_key:
-                self._add_inferred_fk(right, right_column, left, left_column)
-            elif right_column in right.primary_key and left_column not in left.primary_key:
-                self._add_inferred_fk(left, left_column, right, right_column)
+            left_ref = self._resolve_column(left, aliases)
+            right_ref = self._resolve_column(right, aliases)
+            if left_ref is None or right_ref is None:
+                continue
+            left_table, left_column = left_ref
+            right_table, right_column = right_ref
+            if left_column in left_table.primary_key and right_column not in right_table.primary_key:
+                self._add_inferred_fk(right_table, right_column, left_table, left_column, provenance)
+            elif right_column in right_table.primary_key and left_column not in left_table.primary_key:
+                self._add_inferred_fk(left_table, left_column, right_table, right_column, provenance)
+
+    def _resolve_column(
+        self, column: exp.Column, aliases: dict[str, tuple[str, str]]
+    ) -> tuple[Table, str] | None:
+        table_ref = column.table
+        if not table_ref:
+            return None
+        key = aliases.get(table_ref) or aliases.get(_unquote(table_ref))
+        if key is None:
+            return None
+        table = self.tables.get(self._table_key(*key))
+        if table is None:
+            return None
+        return table, column.name
 
     def _add_inferred_fk(
-        self, child: Table, child_column: str, parent: Table, parent_column: str
+        self,
+        child: Table,
+        child_column: str,
+        parent: Table,
+        parent_column: str,
+        provenance: Provenance,
     ) -> None:
         if any(child_column in fk.child_columns for fk in child.foreign_keys):
             return
@@ -826,8 +1174,21 @@ class DumpLoader:
                 parent_table=parent.name,
                 parent_columns=[parent_column],
                 inferred=True,
+                provenance=provenance,
             )
         )
+
+    def _create_view(self, statement: str, materialized: bool = False) -> None:
+        kind = "materialized_view" if materialized else "view"
+        self._store_object(kind, statement)
+        try:
+            tree = sqlglot.parse_one(statement, read="postgres")
+        except Exception:  # noqa: BLE001 - a view we cannot parse is still stored raw
+            return
+        if isinstance(tree, exp.Create) and tree.expression is not None:
+            self._infer_joins_from_query(
+                tree.expression, Provenance(kind, statement.splitlines()[0][:200])
+            )
 
 
 def _compatible(left: Column, right: Column) -> bool:

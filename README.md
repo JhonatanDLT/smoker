@@ -74,7 +74,7 @@ open proof/report.html
 Expected output:
 
 ```
-pgproof 0.4.0 · 10 tables · 2,000 rows · seed 42
+pgproof 0.4.1 · 10 tables · 2,000 rows · seed 42
   generate billing.accounts        200 rows
   generate billing.plans           200 rows
   ...
@@ -185,7 +185,8 @@ pgproof run --schema-file db/schema.sql --target-env PGPROOF_TARGET_DSN --out pr
 
 Relationships come from declared foreign keys. When a dump omits them, pgproof
 infers them from `*_id` naming and from `JOIN`s in views, and marks them as
-`inferred`.
+`inferred`. `LIKE`, `INHERITS`, `ATTACH PARTITION`, CTEs and dynamic SQL are
+expanded or scanned, and every extracted object carries provenance.
 
 ## Repairs
 

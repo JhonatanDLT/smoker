@@ -4,6 +4,29 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [0.4.1] — 2026-11-10
+
+### Added
+
+- **`LIKE ... INCLUDING ...`** expansion: columns, defaults, constraints and
+  indexes are copied from the source table.
+- **`INHERITS`** expansion: columns and CHECK constraints are inherited.
+- **`ATTACH PARTITION`** support.
+- **CTE-aware join inference**: `JOIN` nodes inside `WITH` clauses infer
+  relationships.
+- **Dynamic SQL, `IF` and `CASE` extraction** from function and procedure
+  bodies (`statements`, `conditions`, `writes`, `reads`).
+- **Provenance** on tables, constraints, foreign keys, functions, triggers and
+  raw objects.
+- **Raw object storage** for views, materialized views, rules, policies,
+  sequences, extensions, composite types and non-unique indexes.
+- `WHEN` and `UPDATE OF` captured on triggers.
+
+### Measured
+
+- 97 tests passing, including CTE inference, dynamic SQL, `LIKE`/`INHERITS`
+  and `ATTACH PARTITION`.
+
 ## [0.4.0] — 2026-11-10
 
 ### Added
