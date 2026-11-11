@@ -1,11 +1,11 @@
 # Status
 
-**Date:** 2026-11-10
-**Version:** 0.7.1
+**Date:** 2026-11-11
+**Version:** 0.8.0
 **State:** working v1 plus CI output, repair loop, distribution-aware
 generation, partitioned tables, offline schema dumps, segmentation rules, a
-dependency-safe creation order, SQL export and exclusion-aware generation.
-Tested end to end against PostgreSQL 16.
+dependency-safe creation order, SQL export, exclusion-aware generation and a
+dialect layer ready for SQL Server. Tested end to end against PostgreSQL 16.
 
 ---
 
@@ -26,6 +26,10 @@ Tested end to end against PostgreSQL 16.
 | **View filters** classified as aggregate candidates (never applied as checks) | ✅ |
 | **Exclusion constraints** parsed, verified and generated against | ✅ |
 | **Dependency-safe creation order** (`pgproof order`) | ✅ |
+| **Dialect layer** (`SqlDialect`, `Capabilities`, registry) | ✅ |
+| **`DatabaseAdapter` aggregate** (dialect + connection factories) | ✅ |
+| **Dialect-aware invariant SQL, SQL export and report label** | ✅ |
+| **`--dialect` extension point** (SQL Server adapter pending) | ✅ |
 | Invariants from NOT NULL, UNIQUE, PK, FK, CHECK, enums | ✅ |
 | Application rules from YAML spec | ✅ |
 | Deterministic generation (seed per table) | ✅ |
@@ -102,7 +106,9 @@ Tested end to end against PostgreSQL 16.
   `EXCLUDE USING gist (during WITH &&)` and a combined predicate exclusion
   generated 20 rows per table and loaded into PostgreSQL without a violation;
   the report passed.
-- **123 tests passing** (unit, integration and architecture guards).
+- **Dialect layer:** the PostgreSQL invariant SQL moved out of the core; the
+  dialect and architecture contract tests bring the total to **132 tests**.
+- **132 tests passing** (unit, integration and architecture guards).
 - Same seed produces the same dataset hash every run.
 
 ## Documentation
@@ -176,14 +182,17 @@ cli ──► application ──► core (domain + ports)
 - Distributions are per column; correlations are not modelled.
 - No parallel verification yet.
 - Cross-table rules need an explicit `repair:` declaration.
-- SQL Server, MySQL and static code analysis are roadmap items.
+- SQL Server, MySQL and Oracle adapters are not implemented yet; the dialect
+  contract and registry are ready for them.
+- Static code analysis is a roadmap item.
 
 See [`docs/limitations.md`](docs/limitations.md).
 
 ## Next tasks
 
-1. Column correlations and parallel verification.
-2. SQL Server adapter.
+1. SQL Server as a source: `sys.*` introspection, query runner and verification
+   through the new dialect (then as a target).
+2. Column correlations and parallel verification.
 3. Publish to PyPI and the GitHub Marketplace; first design-partner pilot.
 
 ## Decision rules

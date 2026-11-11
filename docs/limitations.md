@@ -152,6 +152,16 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
 - Partitioned tables are checked per generated row, but `ctid`-based
   verification still needs manual review across partitions.
 
+## Dialect limits
+
+- PostgreSQL is the only implemented dialect. The `SqlDialect` contract,
+  `Capabilities`, registry, `DdlLoader` port and `--dialect` flag are in place
+  for SQL Server and others, but their adapters do not exist yet.
+- `--dialect` on `verify`, `run`, `generate` (database mode), `introspect` and
+  `profile` currently fails explicitly for non-PostgreSQL names.
+- The report records the `dialect` used, so mixed-dialect comparisons are
+  possible once a second adapter lands.
+
 ## Distribution and repair limits
 
 - Profiles use `TABLESAMPLE SYSTEM` above 50k rows and `LIMIT` below that.

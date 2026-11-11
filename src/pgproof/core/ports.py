@@ -22,6 +22,11 @@ class CatalogReader(Protocol):
 
 
 @runtime_checkable
+class DdlLoader(Protocol):
+    def load(self, sql: str) -> Catalog: ...
+
+
+@runtime_checkable
 class RowWriter(Protocol):
     def truncate(self, tables: list[Table]) -> None: ...
 

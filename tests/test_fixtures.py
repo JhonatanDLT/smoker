@@ -14,6 +14,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from pgproof.adapters.postgres.dialect import PostgresDialect
 from pgproof.adapters.postgres.introspect import connect, introspect
 from pgproof.adapters.postgres.query_runner import PostgresQueryRunner
 from pgproof.adapters.postgres.writer import PostgresRowWriter
@@ -64,7 +65,7 @@ def test_fixture_generates_and_verifies(fixture: str) -> None:
     connection = psycopg.connect(DSN)
     try:
         verify = VerifyDataset(
-            catalog, PostgresQueryRunner(connection), YamlSpecLoader(), seed=11
+            catalog, PostgresQueryRunner(connection), YamlSpecLoader(), PostgresDialect(), seed=11
         )
         report = verify.execute(
             VerifyRequest(

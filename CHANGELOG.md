@@ -4,6 +4,44 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [0.8.0] — 2026-11-11
+
+### Added
+
+- **Dialect layer** (`core/dialect.py`): `SqlDialect` and `Capabilities`.
+  The core now renders every invariant through an injected dialect instead of
+  hardcoding PostgreSQL SQL.
+- **`PostgresDialect`** (`adapters/postgres/dialect.py`) implements quoting,
+  literals, type classification, constraint SQL, query wrapping and SQL-script
+  statements.
+- **Dialect registry** (`adapters/registry.py`) with `get_adapter`,
+  `get_dialect`, `get_ddl_loader` and `register_adapter`.
+- **`DatabaseAdapter` aggregate** (`adapters/base.py`) bundling dialect, DDL
+  loader, connect, introspection, writer, query runner, executor and profiler.
+  The CLI no longer imports a backend module directly.
+- **`DdlLoader` port** so `load-dump` and `--schema-file` can select a parser
+  per dialect.
+- **Dialect-aware SQL export**: `SqlFileWriter` now takes a `SqlDialect` and
+  delegates transactions, truncate, sequence reseed and identity handling.
+- **`--dialect`** on `load-dump`, `plan`, `order`, `audit`, `generate`,
+  `verify` and `run`. Only `postgres` is implemented; other names fail with a
+  clear message.
+- **`dialect` field** in the JSON report and the HTML summary.
+- Architecture guard: `core/invariants.py` must not contain PostgreSQL SQL.
+
+### Changed
+
+- `invariants_from_catalog(catalog, dialect)` is now dialect-driven.
+- `VerifyDataset` and `AuditSchema` receive a `SqlDialect`.
+- `adapters/base.py` is a compatibility shim; the contracts live in
+  `core/dialect.py`.
+- Report limitations no longer claim that exclusion constraints are only
+  reported.
+
+### Measured
+
+- 132 tests passing.
+
 ## [0.7.1] — 2026-11-10
 
 ### Added

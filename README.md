@@ -74,7 +74,7 @@ open proof/report.html
 Expected output:
 
 ```
-pgproof 0.7.1 · 10 tables · 2,000 rows · seed 42
+pgproof 0.8.0 · 10 tables · 2,000 rows · seed 42
   generate billing.accounts        200 rows
   generate billing.plans           200 rows
   ...
@@ -116,6 +116,7 @@ Common options:
 --max-passes           repair fixed-point limit (default: 3)
 --truncate/--no-truncate
 --sql                  write INSERT statements to a file instead of a database
+--dialect              postgres (SQL Server: adapter pending)
 ```
 
 `pgproof` exits `1` when the report verdict is `FAIL`, so it drops straight into
@@ -299,6 +300,11 @@ cli ──► application ──► core (domain + ports)
 The core has no database driver, no CLI and no I/O. That is what makes a second
 dialect (SQL Server) an adapter, not a rewrite. The dependency rule is enforced
 by `tests/test_architecture.py`.
+
+SQL rendering goes through `core/dialect.py` (`SqlDialect`, `Capabilities`) and
+`adapters/registry.py`. The core no longer contains PostgreSQL-specific
+invariant SQL, and `--dialect` is the extension point for SQL Server and other
+standards. Only `postgres` is implemented today.
 
 See [`docs/architecture.md`](docs/architecture.md) for the ports and the SOLID
 mapping.

@@ -21,7 +21,8 @@ proof/
 | `created_at` | ISO-8601 | UTC timestamp |
 | `seed` | int | Deterministic seed |
 | `database` | string | Target database |
-| `server_version` | string | PostgreSQL version |
+| `server_version` | string | Server version |
+| `dialect` | string | SQL dialect used to render the invariants (`postgres`) |
 | `schema_hash` | sha256 | Hash of the catalog |
 | `dataset_hash` | sha256 | Hash of the generated rows (or of the target after repairs) |
 | `duration_seconds` | float | Verification time |

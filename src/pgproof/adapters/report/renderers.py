@@ -97,7 +97,8 @@ class HtmlRenderer:
 
   <div class="grid">
     <div class="cell"><div class="k">Database</div><div class="v">{html.escape(report.database)}</div></div>
-    <div class="cell"><div class="k">PostgreSQL</div><div class="v">{html.escape(report.server_version)}</div></div>
+    <div class="cell"><div class="k">Dialect</div><div class="v">{html.escape(report.dialect)}</div></div>
+    <div class="cell"><div class="k">Server</div><div class="v">{html.escape(report.server_version)}</div></div>
     <div class="cell"><div class="k">Seed</div><div class="v">{report.seed}</div></div>
     <div class="cell"><div class="k">Duration</div><div class="v">{report.duration_seconds}s</div></div>
     <div class="cell"><div class="k">Schema hash</div><div class="v">{html.escape(report.schema_hash[:32])}…</div></div>

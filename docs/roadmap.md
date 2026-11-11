@@ -71,7 +71,15 @@ The order is deliberate: each phase is funded by the previous one.
 - `pgproof generate --sql` writes INSERT statements from a dump with no database.
 - `EXCLUDE` constraints bound generation, including range overlaps (0.7.1).
 
-## v0.8 — SQL Server (months 4–6)
+## v0.8 — Dialect layer (delivered in 0.8.0)
+
+- `SqlDialect` + `Capabilities` in core.
+- PostgreSQL dialect implementation.
+- Dialect registry, `DdlLoader` port and `--dialect`.
+- Dialect-aware invariant SQL, SQL export and report label.
+- Architecture guard against PostgreSQL SQL in the core.
+
+## v0.9 — SQL Server (months 4–6)
 
 Only if two paying customers request it in writing.
 
@@ -81,7 +89,7 @@ Only if two paying customers request it in writing.
 - SQL Server as a **target** for generation.
 - Same invariant model, same report.
 
-## v0.9 — Other dialects (months 7–9)
+## v0.10 — Other dialects (months 7–9)
 
 - MySQL / MariaDB.
 - Oracle only with an enterprise contract that funds the work.

@@ -43,6 +43,17 @@ pgproof run --schema billing --exclude "*.audit_*" --out proof
 Patterns are shell globs. `billing.*` matches every table in `billing`;
 `*_history` matches any table ending in `_history` in any schema.
 
+### Dialects
+
+`--dialect` selects the SQL renderer and the DDL loader. Only `postgres` is
+implemented today; any other name fails with the list of available dialects.
+The extension point is documented in [`architecture.md`](architecture.md).
+
+```bash
+pgproof verify --dialect postgres --dsn-env PGPROOF_TARGET_DSN
+pgproof load-dump --dialect postgres db/schema.sql -o catalog.json
+```
+
 ### Exit codes
 
 | Code | Meaning |

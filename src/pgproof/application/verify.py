@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..core.dialect import SqlDialect
 from ..core.invariants import Invariant, invariants_from_catalog, merge_invariants
 from ..core.ir import Catalog, to_plain
 from ..core.planner import Plan, build_plan
@@ -30,16 +31,20 @@ class VerifyDataset:
         catalog: Catalog,
         runner: QueryRunner,
         spec_loader: SpecLoader,
+        dialect: SqlDialect,
         seed: int = 42,
     ) -> None:
         self.catalog = catalog
         self.runner = runner
         self.spec_loader = spec_loader
+        self.dialect = dialect
         self.seed = seed
 
     def invariants_for(self, spec_path: str | None) -> list[Invariant]:
         extra = self.spec_loader.load(spec_path) if spec_path else []
-        return merge_invariants(invariants_from_catalog(self.catalog), extra)
+        return merge_invariants(
+            invariants_from_catalog(self.catalog, self.dialect), extra
+        )
 
     def dataset_digest(self) -> str:
         return self.runner.dataset_digest(self.catalog.tables)
@@ -60,4 +65,5 @@ class VerifyDataset:
             dataset_hash=request.dataset_hash,
             repairs=request.repairs,
             rules=[to_plain(rule) for rule in self.catalog.rules],
+            dialect=self.dialect.name,
         )

@@ -13,11 +13,13 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from pgproof.adapters.postgres.dialect import PostgresDialect
 from pgproof.adapters.postgres.query_runner import PostgresQueryRunner
 from pgproof.adapters.postgres.sql_executor import PostgresSqlExecutor
 from pgproof.adapters.postgres.writer import PostgresRowWriter
 from pgproof.adapters.report import FileReportWriter, HtmlRenderer, JsonRenderer
 from pgproof.adapters.spec.yaml_loader import YamlSpecLoader
+from pgproof.core.dialect import SqlDialect
 from pgproof.core.ports import (
     QueryRunner,
     ReportRenderer,
@@ -72,3 +74,25 @@ def test_adapters_satisfy_their_ports() -> None:
     assert isinstance(JsonRenderer(), ReportRenderer)
     assert isinstance(HtmlRenderer(), ReportRenderer)
     assert isinstance(FileReportWriter([]), ReportWriter)
+
+
+def test_postgres_dialect_satisfies_the_dialect_port() -> None:
+    assert isinstance(PostgresDialect(), SqlDialect)
+
+
+def test_core_invariant_renderer_has_no_postgresql_sql() -> None:
+    text = (CORE / "invariants.py").read_text(encoding="utf-8")
+    for token in ("ctid", "::text", "IS FALSE", "count(*)", "varchar", "ILIKE"):
+        assert token not in text, f"core/invariants.py still contains {token!r}"
+
+
+def test_cli_does_not_import_a_backend_module_directly() -> None:
+    text = (SRC / "cli.py").read_text(encoding="utf-8")
+    for token in (
+        "adapters.postgres.introspect",
+        "adapters.postgres.writer",
+        "adapters.postgres.query_runner",
+        "adapters.postgres.sql_executor",
+        "adapters.postgres.profile",
+    ):
+        assert token not in text, f"cli.py imports {token} instead of the registry"

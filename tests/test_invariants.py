@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pgproof.adapters.postgres.dialect import PostgresDialect
 from pgproof.core.invariants import (
     extract_predicate,
     infer_semantic,
@@ -71,7 +72,7 @@ def test_local_rules_derived() -> None:
 
 
 def test_catalog_invariants_cover_constraints(catalog: Catalog) -> None:
-    invariants = invariants_from_catalog(catalog)
+    invariants = invariants_from_catalog(catalog, PostgresDialect())
     kinds = {invariant.kind.value for invariant in invariants}
     assert "not_null" in kinds
     assert "unique" in kinds

@@ -342,7 +342,7 @@ the generation space and do not fail a verification run.
 
 ## SQL export
 
-`adapters/postgres/sql_file_writer.py` implements the same `RowWriter` port as
+`adapters/script.py` implements the same `RowWriter` port as
 the connected writer:
 
 ```bash
@@ -350,9 +350,11 @@ pgproof generate --schema-file db/schema.sql --rows 1000 --sql data.sql
 ```
 
 It emits `BEGIN`, optional batched `TRUNCATE`, batched `INSERT` statements and
-`COMMIT`, plus `setval` calls for identity/serial columns. It uses the same
-canonical row text as the COPY writer for hashing, so the dataset hash matches
-an equivalent connected run. `psql -f data.sql` applies the file to a schema
+`COMMIT`, plus `setval` calls for identity/serial columns. Transactions,
+truncate, sequence reset and identity handling come from the active
+`SqlDialect`; the writer only batches rows and hashes them. It uses the same
+canonical row text as the COPY writer, so the dataset hash matches an
+equivalent connected run. `psql -f data.sql` applies the file to a schema
 created from the dump.
 
 ## Creation and insertion order
@@ -408,6 +410,68 @@ View filters are a different case. A `WHERE` inside a view becomes a
 `RuleCandidate` with `kind="filter"` and `scope="aggregate"`. It describes the
 rows the view exposes, not a constraint on the base table, so it is never
 applied as a check and never changes other candidates.
+
+## Dialects and adapters
+
+The engine is dialect-agnostic. SQL rendering lives behind a port:
+
+```
+core/dialect.py        SqlDialect, Capabilities
+adapters/base.py       DatabaseAdapter (dialect + connection-bound factories)
+adapters/postgres/     dialect.py, introspect.py, writer.py, ...
+adapters/registry.py   get_adapter(), get_dialect(), get_ddl_loader()
+```
+
+`DatabaseAdapter` is the single composition unit:
+
+```python
+DatabaseAdapter(
+    name="postgres",
+    dialect=PostgresDialect(),
+    ddl_loader=DumpLoader(),
+    connect=psycopg.connect,
+    introspect=introspect,
+    writer=PostgresRowWriter,
+    query_runner=PostgresQueryRunner,
+    executor=PostgresSqlExecutor,
+    profiler=profile_catalog,
+)
+```
+
+The CLI asks the registry for one adapter and never imports a backend module.
+That keeps the composition root small and makes a second backend a registry
+entry plus a package.
+
+`SqlDialect` owns:
+
+- identifier quoting and literals
+- type classification
+- the violation SQL for NOT NULL, UNIQUE, FK, CHECK, enum and EXCLUDE
+- count/sample wrapping (`LIMIT` vs `TOP`)
+- SQL-script statements (BEGIN/COMMIT, TRUNCATE, sequence reset, identity
+  insert)
+
+`Capabilities` is data, not a branch on the dialect name: exclusion support,
+native ranges/enums/arrays, partition model, identity/computed/rowversion,
+`TRUNCATE ... CASCADE`, row identity (`ctid` vs primary key), `NOT VALID`,
+filtered indexes, temporal tables, bulk method and sampling method.
+
+`invariants_from_catalog(catalog, dialect)` receives the dialect; the core never
+contains PostgreSQL SQL. `tests/test_architecture.py` fails if `ctid`, `::text`,
+`IS FALSE`, `count(*)` or `ILIKE` reappear in `core/invariants.py`.
+
+To add a dialect:
+
+1. Implement `SqlDialect` in `adapters/<name>/dialect.py`.
+2. Implement a `DdlLoader` for `.sql` dumps.
+3. Implement the connection adapters (`introspect`, `writer`, `query_runner`,
+   `executor`, `profiler`).
+4. Build a `DatabaseAdapter` and register it with `register_adapter()`.
+5. Pass the conformance suite: catalog, types, invariants, generation, errors,
+   scripts and repair.
+
+The CLI exposes `--dialect`; unknown names fail with the available list. Only
+`postgres` is implemented today.
 
 ## Security
 

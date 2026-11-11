@@ -20,11 +20,12 @@ from .verifier import InvariantResult, Verification
 
 DEFAULT_LIMITATIONS = [
     "Triggers are inventoried but their side effects are not replayed or verified in v1.",
-    "Exclusion constraints are reported but not generated against.",
+    "Exclusion constraints are generated against for supported operators only.",
     (
-        "CHECK constraints that cannot be parsed are enforced by PostgreSQL at load time, "
+        "CHECK constraints that cannot be parsed are enforced by the database at load time, "
         "not pre-validated by pgproof."
-    ),    "Profiles are computed from a sample, not from the full table.",
+    ),
+    "Profiles are computed from a sample, not from the full table.",
     "Application-level rules are only verified when declared in the spec file.",
     "Cross-table rules (parent.total = SUM(child.amount)) are verified but not repaired.",
 ]
@@ -42,6 +43,7 @@ class Report:
     duration_seconds: float
     table_counts: dict[str, int]
     results: list[InvariantResult]
+    dialect: str = "postgres"
     warnings: list[str] = field(default_factory=list)
     limitations: list[str] = field(default_factory=lambda: list(DEFAULT_LIMITATIONS))
     command: str = ""
@@ -83,6 +85,7 @@ class Report:
             "seed": self.seed,
             "database": self.database,
             "server_version": self.server_version,
+            "dialect": self.dialect,
             "schema_hash": self.schema_hash,
             "dataset_hash": self.dataset_hash,
             "duration_seconds": self.duration_seconds,
@@ -123,6 +126,7 @@ def build_report(
     dataset_hash: str | None = None,
     repairs: RepairResult | None = None,
     rules: list[dict[str, Any]] | None = None,
+    dialect: str = "postgres",
 ) -> Report:
     schema_hash = hashlib.sha256(
         json.dumps(catalog.to_dict(), sort_keys=True, ensure_ascii=False).encode()
@@ -138,6 +142,7 @@ def build_report(
         seed=plan.seed,
         database=verification.database,
         server_version=verification.server_version,
+        dialect=dialect,
         schema_hash=schema_hash,
         dataset_hash=dataset_hash,
         duration_seconds=verification.duration_seconds,

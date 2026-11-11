@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pgproof.adapters.postgres.dialect import PostgresDialect
 from pgproof.adapters.report.audit_markdown import AuditMarkdownRenderer
 from pgproof.application.audit import AuditSchema
 from pgproof.core.ir import Catalog, CheckConstraint, Column, ForeignKey, Table, Trigger
@@ -61,7 +62,7 @@ def make_catalog() -> Catalog:
 
 
 def test_audit_finds_high_and_medium_risks() -> None:
-    audit = AuditSchema(make_catalog()).execute()
+    audit = AuditSchema(make_catalog(), PostgresDialect()).execute()
 
     assert audit.tables == 2
     assert audit.foreign_keys == 1
@@ -74,7 +75,7 @@ def test_audit_finds_high_and_medium_risks() -> None:
 
 
 def test_audit_markdown_contains_the_sections() -> None:
-    audit = AuditSchema(make_catalog()).execute()
+    audit = AuditSchema(make_catalog(), PostgresDialect()).execute()
     markdown = AuditMarkdownRenderer().render(audit)
 
     assert "# Schema readiness audit" in markdown

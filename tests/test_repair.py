@@ -7,6 +7,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from pgproof.adapters.postgres.dialect import PostgresDialect
 from pgproof.adapters.postgres.introspect import connect, introspect
 from pgproof.adapters.postgres.query_runner import PostgresQueryRunner
 from pgproof.adapters.postgres.sql_executor import PostgresSqlExecutor
@@ -142,7 +143,7 @@ def test_cross_table_repair_reaches_zero() -> None:
     try:
         runner = PostgresQueryRunner(connection)
         executor = PostgresSqlExecutor(connection)
-        verify = VerifyDataset(catalog, runner, YamlSpecLoader(), seed=5)
+        verify = VerifyDataset(catalog, runner, YamlSpecLoader(), PostgresDialect(), seed=5)
         invariants = verify.invariants_for(spec)
         repair = RepairDataset(runner, executor, max_passes=3).execute(invariants)
 

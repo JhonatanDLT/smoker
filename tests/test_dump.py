@@ -8,6 +8,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from pgproof.adapters.postgres.dialect import PostgresDialect
 from pgproof.adapters.postgres.dump import DumpLoader, load_dump, split_statements
 from pgproof.adapters.postgres.introspect import connect, introspect
 from pgproof.adapters.postgres.query_runner import PostgresQueryRunner
@@ -313,7 +314,7 @@ def test_dump_only_generation_passes() -> None:
     connection = psycopg.connect(DSN)
     try:
         verify = VerifyDataset(
-            catalog, PostgresQueryRunner(connection), YamlSpecLoader(), seed=11
+            catalog, PostgresQueryRunner(connection), YamlSpecLoader(), PostgresDialect(), seed=11
         )
         report = verify.execute(
             VerifyRequest(
@@ -476,7 +477,7 @@ def test_trigger_rules_do_not_constrain_generation() -> None:
     connection = psycopg.connect(DSN)
     try:
         report = VerifyDataset(
-            catalog, PostgresQueryRunner(connection), YamlSpecLoader(), seed=13
+            catalog, PostgresQueryRunner(connection), YamlSpecLoader(), PostgresDialect(), seed=13
         ).execute(
             VerifyRequest(dataset_hash=generated.dataset_hash, plan=generated.plan)
         )
@@ -538,7 +539,7 @@ def test_exclusion_constraint_is_a_declared_constraint() -> None:
 
     invariant = next(
         item
-        for item in invariants_from_catalog(catalog)
+        for item in invariants_from_catalog(catalog, PostgresDialect())
         if item.kind == InvariantKind.EXCLUSION
     )
     assert 'a."room" = b."room"' in invariant.violation_sql

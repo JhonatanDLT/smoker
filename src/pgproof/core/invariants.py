@@ -12,7 +12,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from .ir import Catalog, Column, Table, quote_ident, quote_qualified
+from .dialect import SqlDialect
+from .ir import Catalog, Column, Table
 
 
 class InvariantKind(str, Enum):
@@ -239,60 +240,14 @@ def parse_local_rules(table: Table) -> LocalRules:
     return rules
 
 
-def _q(schema: str, table: str) -> str:
-    return quote_qualified(schema, table)
-
-
-def _qualify_predicate(predicate: str, table: Table, alias: str = "a") -> str:
-    """Prefix unqualified column names in an exclusion predicate with an alias."""
-    columns = {column.name for column in table.columns}
-    result: list[str] = []
-    index = 0
-    in_string = False
-    while index < len(predicate):
-        char = predicate[index]
-        if char == "'":
-            if in_string and index + 1 < len(predicate) and predicate[index + 1] == "'":
-                result.append("''")
-                index += 2
-                continue
-            in_string = not in_string
-            result.append(char)
-            index += 1
-            continue
-        if in_string:
-            result.append(char)
-            index += 1
-            continue
-        match = re.match(r"[A-Za-z_][A-Za-z0-9_]*", predicate[index:])
-        if match is not None:
-            word = match.group(0)
-            before = predicate[index - 1] if index > 0 else ""
-            if word in columns and before != ".":
-                result.append(f'{alias}.{_c(word)}')
-            else:
-                result.append(word)
-            index += len(word)
-            continue
-        result.append(char)
-        index += 1
-    return "".join(result)
-
-
-def _c(name: str) -> str:
-    return quote_ident(name)
-
-
 def _invariant_id(kind: str, table: Table, suffix: str) -> str:
     digest = hashlib.sha1(f"{kind}:{table.key}:{suffix}".encode()).hexdigest()[:10]
     return f"{kind}:{table.key}:{digest}"
 
 
-def invariants_from_catalog(catalog: Catalog) -> list[Invariant]:
+def invariants_from_catalog(catalog: Catalog, dialect: SqlDialect) -> list[Invariant]:
     invariants: list[Invariant] = []
     for table in catalog.tables:
-        qualified = _q(table.schema, table.name)
-
         for column in table.columns:
             if not column.nullable:
                 invariants.append(
@@ -302,14 +257,10 @@ def invariants_from_catalog(catalog: Catalog) -> list[Invariant]:
                         table=table.key,
                         columns=[column.name],
                         description=f"{table.key}.{column.name} is never null",
-                        violation_sql=(
-                            f"SELECT 1 AS violation FROM {qualified} "
-                            f"WHERE {_c(column.name)} IS NULL"
-                        ),
+                        violation_sql=dialect.not_null_sql(table, column),
                     )
                 )
             if column.enum_values:
-                values = ", ".join(_sql_literal(v) for v in column.enum_values)
                 invariants.append(
                     Invariant(
                         id=_invariant_id("enum", table, column.name),
@@ -320,17 +271,11 @@ def invariants_from_catalog(catalog: Catalog) -> list[Invariant]:
                             f"{table.key}.{column.name} only takes "
                             f"{', '.join(column.enum_values)}"
                         ),
-                        violation_sql=(
-                            f"SELECT 1 AS violation FROM {qualified} "
-                            f"WHERE {_c(column.name)} IS NOT NULL "
-                            f"AND {_c(column.name)}::text NOT IN ({values})"
-                        ),
+                        violation_sql=dialect.enum_sql(table, column),
                     )
                 )
 
         if table.primary_key:
-            columns = ", ".join(_c(name) for name in table.primary_key)
-            not_null = " AND ".join(f"{_c(name)} IS NOT NULL" for name in table.primary_key)
             invariants.append(
                 Invariant(
                     id=_invariant_id("unique", table, "pk"),
@@ -338,16 +283,11 @@ def invariants_from_catalog(catalog: Catalog) -> list[Invariant]:
                     table=table.key,
                     columns=list(table.primary_key),
                     description=f"{table.key} primary key is unique",
-                    violation_sql=(
-                        f"SELECT {columns}, count(*) AS duplicates FROM {qualified} "
-                        f"WHERE {not_null} GROUP BY {columns} HAVING count(*) > 1"
-                    ),
+                    violation_sql=dialect.unique_sql(table, table.primary_key),
                 )
             )
 
         for unique in table.uniques:
-            columns = ", ".join(_c(name) for name in unique.columns)
-            not_null = " AND ".join(f"{_c(name)} IS NOT NULL" for name in unique.columns)
             invariants.append(
                 Invariant(
                     id=_invariant_id("unique", table, unique.name),
@@ -355,23 +295,12 @@ def invariants_from_catalog(catalog: Catalog) -> list[Invariant]:
                     table=table.key,
                     columns=list(unique.columns),
                     description=f"{table.key}({', '.join(unique.columns)}) is unique",
-                    violation_sql=(
-                        f"SELECT {columns}, count(*) AS duplicates FROM {qualified} "
-                        f"WHERE {not_null} GROUP BY {columns} HAVING count(*) > 1"
-                    ),
+                    violation_sql=dialect.unique_sql(table, unique.columns),
                     provenance=unique.provenance.source if unique.provenance else None,
                 )
             )
 
         for fk in table.foreign_keys:
-            child_columns = ", ".join(_c(name) for name in fk.child_columns)
-            conditions = " AND ".join(
-                f"c.{_c(name)} IS NOT NULL" for name in fk.child_columns
-            )
-            joins = " AND ".join(
-                f"p.{_c(parent)} = c.{_c(child)}"
-                for child, parent in zip(fk.child_columns, fk.parent_columns)
-            )
             invariants.append(
                 Invariant(
                     id=_invariant_id("fk", table, fk.name),
@@ -382,12 +311,7 @@ def invariants_from_catalog(catalog: Catalog) -> list[Invariant]:
                         f"{table.key}({', '.join(fk.child_columns)}) references "
                         f"{fk.parent_key}({', '.join(fk.parent_columns)})"
                     ),
-                    violation_sql=(
-                        f"SELECT {child_columns} FROM {qualified} c "
-                        f"WHERE {conditions} AND NOT EXISTS ("
-                        f"SELECT 1 FROM {_q(fk.parent_schema, fk.parent_table)} p "
-                        f"WHERE {joins})"
-                    ),
+                    violation_sql=dialect.foreign_key_sql(table, fk),
                     provenance=fk.provenance.source if fk.provenance else None,
                 )
             )
@@ -415,16 +339,17 @@ def invariants_from_catalog(catalog: Catalog) -> list[Invariant]:
                     table=table.key,
                     columns=_columns_in_predicate(predicate),
                     description=f"{table.key} check {check.name}: {predicate}",
-                    violation_sql=(
-                        f"SELECT 1 AS violation FROM {qualified} "
-                        f"WHERE ({predicate}) IS FALSE"
-                    ),
+                    violation_sql=dialect.check_sql(table, predicate),
                     note=None if check.validated else "constraint is NOT VALID on existing rows",
                     provenance=check.provenance.source if check.provenance else None,
                 )
             )
 
         for exclusion in table.exclusions:
+            element_text = ", ".join(
+                f"{element.column} WITH {element.operator}"
+                for element in exclusion.elements
+            )
             if not exclusion.elements:
                 invariants.append(
                     Invariant(
@@ -439,19 +364,28 @@ def invariants_from_catalog(catalog: Catalog) -> list[Invariant]:
                     )
                 )
                 continue
-            conditions = " AND ".join(
-                f"a.{_c(element.column)} {element.operator} b.{_c(element.column)}"
-                for element in exclusion.elements
-            )
-            predicate = (
-                f" AND {_qualify_predicate(exclusion.predicate, table)}"
-                if exclusion.predicate
-                else ""
-            )
-            element_text = ", ".join(
-                f"{element.column} WITH {element.operator}"
-                for element in exclusion.elements
-            )
+            violation_sql = dialect.exclusion_sql(table, exclusion)
+            if violation_sql is None:
+                invariants.append(
+                    Invariant(
+                        id=_invariant_id("exclusion", table, exclusion.name),
+                        kind=InvariantKind.EXCLUSION,
+                        table=table.key,
+                        description=(
+                            f"{table.key} exclusion {exclusion.name} ({element_text})"
+                        ),
+                        violation_sql="",
+                        status=InvariantStatus.SKIPPED,
+                        columns=[element.column for element in exclusion.elements],
+                        note=f"dialect {dialect.name} does not support exclusion constraints",
+                        provenance=(
+                            exclusion.provenance.source
+                            if exclusion.provenance
+                            else None
+                        ),
+                    )
+                )
+                continue
             invariants.append(
                 Invariant(
                     id=_invariant_id("exclusion", table, exclusion.name),
@@ -459,10 +393,7 @@ def invariants_from_catalog(catalog: Catalog) -> list[Invariant]:
                     table=table.key,
                     columns=[element.column for element in exclusion.elements],
                     description=f"{table.key} exclusion {exclusion.name} ({element_text})",
-                    violation_sql=(
-                        f"SELECT a.ctid FROM {qualified} a JOIN {qualified} b "
-                        f"ON a.ctid < b.ctid WHERE {conditions}{predicate}"
-                    ),
+                    violation_sql=violation_sql,
                     provenance=(
                         exclusion.provenance.source if exclusion.provenance else None
                     ),
@@ -523,10 +454,6 @@ _SQL_KEYWORDS = {
     "length",
     "char_length",
 }
-
-
-def _sql_literal(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
 
 
 def merge_invariants(base: list[Invariant], extra: list[Invariant]) -> list[Invariant]:

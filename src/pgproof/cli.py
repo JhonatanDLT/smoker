@@ -13,19 +13,14 @@ import time
 from pathlib import Path
 from typing import Any
 
-import psycopg
 import typer
 
 from . import __version__
-from .adapters.postgres.dump import load_dump
-from .adapters.postgres.introspect import connect, introspect
-from .adapters.postgres.profile import profile_catalog
-from .adapters.postgres.query_runner import PostgresQueryRunner
-from .adapters.postgres.sql_executor import PostgresSqlExecutor
-from .adapters.postgres.sql_file_writer import SqlFileWriter
-from .adapters.postgres.writer import PostgresRowWriter
+from .adapters.base import DatabaseAdapter
+from .adapters.registry import get_adapter
 from .adapters.report import FileReportWriter, HtmlRenderer, JsonRenderer, JUnitRenderer
 from .adapters.report.audit_markdown import AuditMarkdownRenderer
+from .adapters.script import SqlFileWriter
 from .adapters.spec.yaml_loader import SpecError, YamlSpecLoader
 from .application.audit import AuditSchema
 from .application.generate import GenerateDataset
@@ -34,12 +29,14 @@ from .application.repair import RepairDataset
 from .application.run import RunPipeline
 from .application.verify import VerifyDataset, VerifyRequest
 from .core.creation import creation_order
+from .core.dialect import SqlDialect
 from .core.errors import LoadError, RepairError
 from .core.filters import filter_catalog, split_patterns
 from .core.generator import GenerationError
 from .core.invariants import semantic_for_catalog
 from .core.ir import Catalog, to_plain
 from .core.planner import PlanError, build_plan
+from .core.ports import DdlLoader
 from .core.profile import Profile
 
 app = typer.Typer(
@@ -99,14 +96,30 @@ def _apply_filters(
     )
 
 
+def _adapter(name: str) -> DatabaseAdapter:
+    try:
+        return get_adapter(name)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--dialect") from exc
+
+
+def _dialect(name: str) -> SqlDialect:
+    return _adapter(name).dialect
+
+
+def _ddl_loader(name: str) -> DdlLoader:
+    return _adapter(name).ddl_loader
+
+
 def _introspect(
+    adapter: DatabaseAdapter,
     dsn: str,
     schema: str | None = None,
     include: str | None = None,
     exclude: str | None = None,
 ) -> Catalog:
-    with connect(dsn) as conn:
-        catalog = introspect(conn)
+    with adapter.connect(dsn) as conn:
+        catalog = adapter.introspect(conn)
     catalog = _apply_filters(catalog, schema, include, exclude)
     semantic_for_catalog(catalog)
     return catalog
@@ -119,19 +132,24 @@ def _load_catalog(
     include: str | None = None,
     exclude: str | None = None,
     schema_file: Path | None = None,
+    dialect: str = "postgres",
 ) -> Catalog:
+    adapter = _adapter(dialect)
     if path:
         catalog = Catalog.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
         catalog = _apply_filters(catalog, schema, include, exclude)
         semantic_for_catalog(catalog)
         return catalog
     if schema_file:
-        catalog = _apply_filters(load_dump(schema_file), schema, include, exclude)
+        sql = Path(schema_file).read_text(encoding="utf-8")
+        catalog = _apply_filters(
+            adapter.ddl_loader.load(sql), schema, include, exclude
+        )
         semantic_for_catalog(catalog)
         return catalog
     if dsn is None:
         raise typer.BadParameter("provide --dsn, --schema-file or --catalog")
-    return _introspect(dsn, schema, include, exclude)
+    return _introspect(adapter, dsn, schema, include, exclude)
 
 
 def _load_profile(path: Path | None) -> Profile | None:
@@ -209,9 +227,13 @@ def introspect_cmd(
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
     out: Path = typer.Option(Path("catalog.json"), "--out", "-o"),
+    dialect: str = typer.Option(
+        "postgres", "--dialect", help="Dialect: postgres (sqlserver planned)"
+    ),
 ) -> None:
-    """Read a PostgreSQL catalog and save it as JSON."""
-    catalog = _introspect(_dsn(dsn, dsn_env), schema, include, exclude)
+    """Read a catalog and save it as JSON."""
+    adapter = _adapter(dialect)
+    catalog = _introspect(adapter, _dsn(dsn, dsn_env), schema, include, exclude)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(catalog.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
     typer.echo(
@@ -227,9 +249,15 @@ def load_dump_cmd(
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
+    dialect: str = typer.Option(
+        "postgres", "--dialect", help="Dialect of the dump: postgres (sqlserver planned)"
+    ),
 ) -> None:
     """Load a schema dump (.sql) and save the catalog as JSON."""
-    catalog = _apply_filters(load_dump(file), schema, include, exclude)
+    loader = _ddl_loader(dialect)
+    catalog = _apply_filters(
+        loader.load(file.read_text(encoding="utf-8")), schema, include, exclude
+    )
     semantic_for_catalog(catalog)
     payload = catalog.to_dict()
     payload["creation_order"] = to_plain(creation_order(catalog))
@@ -260,6 +288,9 @@ def order_cmd(
     output_format: str = typer.Option(
         "text", "--format", help="text or json"
     ),
+    dialect: str = typer.Option(
+        "postgres", "--dialect", help="Dialect: postgres (sqlserver planned)"
+    ),
 ) -> None:
     """Show a dependency-safe creation and insertion order."""
     catalog = _load_catalog(
@@ -269,6 +300,7 @@ def order_cmd(
         include,
         exclude,
         schema_file,
+        dialect,
     )
     order = creation_order(catalog)
     if output_format == "json":
@@ -310,6 +342,9 @@ def plan_cmd(
     seed: int = typer.Option(42, "--seed"),
     table_rows: str | None = typer.Option(None, "--table-rows"),
     out: Path = typer.Option(Path("plan.json"), "--out", "-o"),
+    dialect: str = typer.Option(
+        "postgres", "--dialect", help="Dialect: postgres (sqlserver planned)"
+    ),
 ) -> None:
     """Build and print a generation plan without touching any data."""
     catalog = _load_catalog(
@@ -319,6 +354,7 @@ def plan_cmd(
         include,
         exclude,
         schema_file,
+        dialect,
     )
     try:
         plan = build_plan(
@@ -357,6 +393,9 @@ def audit_cmd(
         None, "--schema-file", help="Load the catalog from a .sql dump"
     ),
     out: Path = typer.Option(Path("audit.md"), "--out", "-o"),
+    dialect: str = typer.Option(
+        "postgres", "--dialect", help="Dialect: postgres (sqlserver planned)"
+    ),
 ) -> None:
     """Produce a schema readiness audit without reading any data."""
     catalog = _load_catalog(
@@ -366,8 +405,9 @@ def audit_cmd(
         include,
         exclude,
         schema_file,
+        dialect,
     )
-    audit = AuditSchema(catalog).execute()
+    audit = AuditSchema(catalog, _dialect(dialect)).execute()
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(AuditMarkdownRenderer().render(audit), encoding="utf-8")
     typer.echo(
@@ -394,6 +434,9 @@ def profile_cmd(
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
+    dialect: str = typer.Option(
+        "postgres", "--dialect", help="Dialect: postgres (sqlserver planned)"
+    ),
 ) -> None:
     """Sample the source and save a profile for distribution-aware generation."""
     if sample_method not in {"auto", "limit", "system", "bernoulli"}:
@@ -401,10 +444,11 @@ def profile_cmd(
             "invalid --sample-method: choose auto, limit, system or bernoulli"
         )
         return
+    adapter = _adapter(dialect)
     dsn_value = _dsn(dsn, dsn_env)
-    catalog = _introspect(dsn_value, schema, include, exclude)
-    with connect(dsn_value) as connection:
-        profile = profile_catalog(
+    catalog = _introspect(adapter, dsn_value, schema, include, exclude)
+    with adapter.connect(dsn_value) as connection:
+        profile = adapter.profile(
             connection,
             catalog.tables,
             sample=sample,
@@ -449,6 +493,9 @@ def generate_cmd(
         "--sql",
         help="Write INSERT statements to this .sql file instead of a target database",
     ),
+    dialect: str = typer.Option(
+        "postgres", "--dialect", help="Dialect: postgres (sqlserver planned)"
+    ),
 ) -> None:
     """Generate rows into the target database, or into a .sql file."""
     source_dsn = _dsn(source, source_env) if schema_file is None else None
@@ -459,14 +506,15 @@ def generate_cmd(
             typer.echo("warning: source and target are the same database", err=True)
 
     catalog = _load_catalog(
-        catalog_path, source_dsn, schema, include, exclude, schema_file
+        catalog_path, source_dsn, schema, include, exclude, schema_file, dialect
     )
+    adapter = _adapter(dialect)
     writer: Any
     if sql_out is not None:
-        writer = SqlFileWriter(sql_out, truncate=truncate_first)
+        writer = SqlFileWriter(sql_out, adapter.dialect, truncate=truncate_first)
     else:
         assert target_dsn is not None
-        writer = PostgresRowWriter(psycopg.connect(target_dsn))
+        writer = adapter.writer(adapter.connect(target_dsn))
     use_case = GenerateDataset(
         catalog,
         writer,
@@ -517,16 +565,24 @@ def verify_cmd(
     schema_file: Path | None = typer.Option(
         None, "--schema-file", help="Load the catalog from a .sql dump"
     ),
+    dialect: str = typer.Option(
+        "postgres", "--dialect", help="Dialect: postgres (sqlserver planned)"
+    ),
 ) -> None:
     """Verify every invariant against the target database."""
+    adapter = _adapter(dialect)
     target_dsn = _dsn(dsn, dsn_env)
-    connection = psycopg.connect(target_dsn)
+    connection = adapter.connect(target_dsn)
     try:
         catalog = _load_catalog(
-            catalog_path, target_dsn, schema, include, exclude, schema_file
+            catalog_path, target_dsn, schema, include, exclude, schema_file, dialect
         )
         use_case = VerifyDataset(
-            catalog, PostgresQueryRunner(connection), YamlSpecLoader(), seed=seed
+            catalog,
+            adapter.query_runner(connection),
+            YamlSpecLoader(),
+            adapter.dialect,
+            seed=seed,
         )
         report = use_case.execute(
             VerifyRequest(
@@ -577,8 +633,12 @@ def run_cmd(
     schema_file: Path | None = typer.Option(
         None, "--schema-file", help="Load the catalog from a .sql dump"
     ),
+    dialect: str = typer.Option(
+        "postgres", "--dialect", help="Dialect: postgres (sqlserver planned)"
+    ),
 ) -> None:
     """Introspect, generate, verify and write a report."""
+    adapter = _adapter(dialect)
     started = time.perf_counter()
     source_dsn = _dsn(source, source_env) if schema_file is None else None
     target_dsn = _dsn(target, target_env)
@@ -586,15 +646,15 @@ def run_cmd(
         typer.echo("warning: source and target are the same database", err=True)
 
     catalog = _load_catalog(
-        catalog_path, source_dsn, schema, include, exclude, schema_file
+        catalog_path, source_dsn, schema, include, exclude, schema_file, dialect
     )
     out.mkdir(parents=True, exist_ok=True)
     (out / "catalog.json").write_text(
         json.dumps(catalog.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
-    connection = psycopg.connect(target_dsn)
-    writer = PostgresRowWriter(connection)
+    connection = adapter.connect(target_dsn)
+    writer = adapter.writer(connection)
     generate = GenerateDataset(
         catalog,
         writer,
@@ -606,10 +666,16 @@ def run_cmd(
         progress=_progress,
         profile=_load_profile(profile_path),
     )
-    verify = VerifyDataset(catalog, PostgresQueryRunner(connection), YamlSpecLoader(), seed=seed)
+    verify = VerifyDataset(
+        catalog,
+        adapter.query_runner(connection),
+        YamlSpecLoader(),
+        adapter.dialect,
+        seed=seed,
+    )
     repair = RepairDataset(
-        PostgresQueryRunner(connection),
-        PostgresSqlExecutor(connection),
+        adapter.query_runner(connection),
+        adapter.executor(connection),
         max_passes=max_passes,
     )
 

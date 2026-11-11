@@ -9,6 +9,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from pgproof.adapters.postgres.dialect import PostgresDialect
 from pgproof.adapters.postgres.introspect import connect, introspect
 from pgproof.adapters.postgres.profile import profile_catalog
 from pgproof.adapters.postgres.query_runner import PostgresQueryRunner
@@ -59,7 +60,7 @@ def test_profile_reproduces_the_source_skew() -> None:
     connection = psycopg.connect(DSN)
     try:
         verify = VerifyDataset(
-            catalog, PostgresQueryRunner(connection), YamlSpecLoader(), seed=7
+            catalog, PostgresQueryRunner(connection), YamlSpecLoader(), PostgresDialect(), seed=7
         )
         report = verify.execute(
             VerifyRequest(spec_path=str(ROOT / "examples/saas-billing/plan.yml"))

@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from ..core.audit import Audit, Risk
+from ..core.dialect import SqlDialect
 from ..core.invariants import invariants_from_catalog, parse_local_rules
 from ..core.ir import Catalog
 
 
 class AuditSchema:
-    def __init__(self, catalog: Catalog) -> None:
+    def __init__(self, catalog: Catalog, dialect: SqlDialect) -> None:
         self.catalog = catalog
+        self.dialect = dialect
 
     def execute(self) -> Audit:
         risks: list[Risk] = []
@@ -89,7 +91,7 @@ class AuditSchema:
                         )
                     )
 
-        invariants = invariants_from_catalog(self.catalog)
+        invariants = invariants_from_catalog(self.catalog, self.dialect)
         counts: dict[str, int] = {}
         for invariant in invariants:
             counts[invariant.kind.value] = counts.get(invariant.kind.value, 0) + 1
