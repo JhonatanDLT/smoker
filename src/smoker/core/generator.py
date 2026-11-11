@@ -674,11 +674,11 @@ class Generator:
         elif kind == DataKind.TIME:
             value = time(rng.randint(0, 23), rng.randint(0, 59), rng.randint(0, 59))
         elif kind == DataKind.JSON:
-            value = '{"source": "pgproof", "synthetic": true}'
+            value = '{"source": "smoker", "synthetic": true}'
         elif kind == DataKind.RANGE:
             value = self._range_literal(column, index)
         elif kind == DataKind.BYTEA:
-            value = b"pgproof"
+            value = b"smoker"
         elif kind == DataKind.INET:
             value = f"192.168.{rng.randint(0, 255)}.{rng.randint(1, 254)}"
         elif kind == DataKind.ARRAY:
@@ -972,7 +972,7 @@ class Generator:
         if unsupported:
             raise GenerationError(
                 f"{table.key}: exclusion constraint(s) "
-                f"{', '.join(unsupported)} use operators pgproof cannot generate against"
+                f"{', '.join(unsupported)} use operators smoker cannot generate against"
             )
         columns = table.writable_columns
         names = [column.name for column in columns]

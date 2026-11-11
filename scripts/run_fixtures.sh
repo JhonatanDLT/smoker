@@ -8,15 +8,15 @@ cd "$ROOT"
 ROWS="${ROWS:-100}"
 
 for fixture in ecommerce multi-tenant-crm analytics partitioned-events; do
-  db="pgproof_${fixture//-/_}"
+  db="smoker_${fixture//-/_}"
   echo "=== $fixture ($db) ==="
   dropdb --if-exists "$db" >/dev/null 2>&1 || true
   createdb "$db"
   psql -d "$db" -q -f "examples/$fixture/schema.sql"
 
-  PGPROOF_SOURCE_DSN="postgresql:///$db" \
-  PGPROOF_TARGET_DSN="postgresql:///$db" \
-    .venv/bin/pgproof run \
+  SMOKER_SOURCE_DSN="postgresql:///$db" \
+  SMOKER_TARGET_DSN="postgresql:///$db" \
+    .venv/bin/smoker run \
       --rows "$ROWS" \
       --seed 42 \
       --spec "examples/$fixture/plan.yml" \

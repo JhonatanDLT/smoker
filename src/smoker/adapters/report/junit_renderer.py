@@ -19,7 +19,7 @@ class JUnitRenderer:
     def render(self, report: Report) -> str:
         summary = report.summary()
         attributes = {
-            "name": "pgproof",
+            "name": "smoker",
             "tests": str(summary["total"]),
             "failures": str(summary["failed"]),
             "errors": str(summary["error"]),

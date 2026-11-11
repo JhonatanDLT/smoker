@@ -11,7 +11,7 @@ This page exists because trust is built by publishing what you do **not** do.
   functions, view filters and application rules are segmentation: they are
   reported, but they never add or remove allowed values.
 - A schema loaded from a dump can be populated without a database:
-  `pgproof generate --schema-file schema.sql --sql data.sql` writes an
+  `smoker generate --schema-file schema.sql --sql data.sql` writes an
   `INSERT` script that `psql -f` can apply.
 - Composite foreign keys are supported.
 - Partitioned tables are supported for range, list and hash keys, including
@@ -134,7 +134,7 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
 
 ## SQL export limits
 
-- `pgproof generate --sql` emits `INSERT` statements, not a `COPY` block. The
+- `smoker generate --sql` emits `INSERT` statements, not a `COPY` block. The
   file is valid for `psql -f` but is larger than a dump.
 - The target schema must already exist; the file does not create tables, types,
   functions or triggers.
@@ -169,9 +169,9 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
 - Live introspection, verification, generation, repair, T-SQL dump loading,
   profiling and range partitions are implemented. Stored procedures, functions
   and triggers are inventoried with parameters/body and segmentation guards.
-- Install the driver with `pip install "pgproof[sqlserver]"` and set
-  `PGPROOF_MSSQL_DSN` (ODBC connection string).
-- Integration tests are gated by `PGPROOF_MSSQL_DSN`. They were verified against
+- Install the driver with `pip install "smoker[sqlserver]"` and set
+  `SMOKER_MSSQL_DSN` (ODBC connection string).
+- Integration tests are gated by `SMOKER_MSSQL_DSN`. They were verified against
   SQL Server 2022 Developer in a Docker container, but are not yet part of the
   default CI matrix.
 - `EXCLUDE` does not exist in SQL Server; the capability is false and the
@@ -179,7 +179,7 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
 - Partition functions/schemes are mapped to a single canonical range node. The
   generator samples inside the boundary range; SQL Server routes the rows.
 - Temporal tables: system-period columns are marked non-writable. With
-  `--temporal-history`, pgproof updates one safe column per temporal table so
+  `--temporal-history`, smoker updates one safe column per temporal table so
   SQL Server writes one history version per current row. Temporal invariants
   check that history periods are ordered and never overlap, and that current
   rows never overlap their own history. Zero-length periods are valid because
@@ -224,9 +224,9 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
 - Correlations between columns (country ↔ city, price ↔ category) are not
   modelled. Each distribution is sampled independently.
 - `top_values` can contain personally identifiable information. Use
-  `pgproof profile --no-values` for sensitive schemas, and keep the profile file
+  `smoker profile --no-values` for sensitive schemas, and keep the profile file
   out of the repository.
-- Repairs are explicit SQL. pgproof does not invert arbitrary application rules
+- Repairs are explicit SQL. smoker does not invert arbitrary application rules
   automatically.
 - Repairs run at most `--max-passes` times. A rule that does not converge is
   reported as residual; it is never retried forever.

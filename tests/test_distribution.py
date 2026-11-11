@@ -3,17 +3,17 @@ from __future__ import annotations
 import random
 from decimal import Decimal
 
-from pgproof.core.distribution import (
+from smoker.core.distribution import (
     BooleanDistribution,
     CategoricalDistribution,
     NumericDistribution,
     build_distribution,
     coerce_value,
 )
-from pgproof.core.generator import Generator
-from pgproof.core.ir import Catalog, Column, Table
-from pgproof.core.planner import build_plan
-from pgproof.core.profile import ColumnStats, Profile, TableStats
+from smoker.core.generator import Generator
+from smoker.core.ir import Catalog, Column, Table
+from smoker.core.planner import build_plan
+from smoker.core.profile import ColumnStats, Profile, TableStats
 
 
 def test_categorical_distribution_respects_weights() -> None:

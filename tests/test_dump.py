@@ -8,18 +8,18 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from pgproof.adapters.postgres.dialect import PostgresDialect
-from pgproof.adapters.postgres.dump import DumpLoader, load_dump, split_statements
-from pgproof.adapters.postgres.introspect import connect, introspect
-from pgproof.adapters.postgres.query_runner import PostgresQueryRunner
-from pgproof.adapters.postgres.writer import PostgresRowWriter
-from pgproof.adapters.spec.yaml_loader import YamlSpecLoader
-from pgproof.application.generate import GenerateDataset
-from pgproof.application.verify import VerifyDataset, VerifyRequest
-from pgproof.core.filters import filter_catalog
-from pgproof.core.invariants import InvariantKind, invariants_from_catalog
+from smoker.adapters.postgres.dialect import PostgresDialect
+from smoker.adapters.postgres.dump import DumpLoader, load_dump, split_statements
+from smoker.adapters.postgres.introspect import connect, introspect
+from smoker.adapters.postgres.query_runner import PostgresQueryRunner
+from smoker.adapters.postgres.writer import PostgresRowWriter
+from smoker.adapters.spec.yaml_loader import YamlSpecLoader
+from smoker.application.generate import GenerateDataset
+from smoker.application.verify import VerifyDataset, VerifyRequest
+from smoker.core.filters import filter_catalog
+from smoker.core.invariants import InvariantKind, invariants_from_catalog
 
-DSN = os.environ.get("PGPROOF_TEST_DSN")
+DSN = os.environ.get("SMOKER_TEST_DSN")
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -242,7 +242,7 @@ def test_raw_objects_are_stored() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(not DSN, reason="PGPROOF_TEST_DSN is not set")
+@pytest.mark.skipif(not DSN, reason="SMOKER_TEST_DSN is not set")
 def test_dump_matches_live_introspection() -> None:
     assert DSN
     subprocess.run(
@@ -286,7 +286,7 @@ def test_dump_matches_live_introspection() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(not DSN, reason="PGPROOF_TEST_DSN is not set")
+@pytest.mark.skipif(not DSN, reason="SMOKER_TEST_DSN is not set")
 def test_dump_only_generation_passes() -> None:
     assert DSN
     subprocess.run(
@@ -429,10 +429,10 @@ def test_compound_condition_is_a_low_confidence_candidate() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(not DSN, reason="PGPROOF_TEST_DSN is not set")
+@pytest.mark.skipif(not DSN, reason="SMOKER_TEST_DSN is not set")
 def test_trigger_rules_do_not_constrain_generation() -> None:
     assert DSN
-    schema = "pgproof_rules_test"
+    schema = "smoker_rules_test"
     dump = f"""
     DROP SCHEMA IF EXISTS {schema} CASCADE;
     CREATE SCHEMA {schema};

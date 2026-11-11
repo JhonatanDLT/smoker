@@ -14,7 +14,7 @@ Price: **15,000–25,000 MXN**, 50% upfront.
 | Day | What happens | Deliverable |
 |---|---|---|
 | 0 | Prospect replies. 20-minute call. | Qualification and next step |
-| 1 | Read-only access or a schema dump. | Baseline `pgproof audit` |
+| 1 | Read-only access or a schema dump. | Baseline `smoker audit` |
 | 2–3 | Agree on 3–5 business invariants. | Signed one-page scope |
 | 4–6 | Generate into staging, add repairs. | First PASS report |
 | 7–8 | Integrate into CI with `--fail-on never`. | Pipeline running |

@@ -79,7 +79,7 @@ nothing and keeps the audit and the report. The provider keeps the learning.
 
 ## Intellectual property
 
-- pgproof remains the provider's property.
+- smoker remains the provider's property.
 - The `plan.yml`, the runbook and the reports belong to the client.
 - The provider may reference the engagement anonymously ("a fintech with 40
   tables") unless the client authorizes a named case study.

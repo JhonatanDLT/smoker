@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
-from pgproof.adapters.report import JUnitRenderer
-from pgproof.core.report import Report
-from pgproof.core.verifier import InvariantResult
+from smoker.adapters.report import JUnitRenderer
+from smoker.core.report import Report
+from smoker.core.verifier import InvariantResult
 
 
 def make_report() -> Report:

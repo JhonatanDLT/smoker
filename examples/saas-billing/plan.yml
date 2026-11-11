@@ -1,5 +1,5 @@
 # Application-level rules that the database cannot express as a constraint.
-# pgproof verifies these against the generated dataset and reports each one
+# smoker verifies these against the generated dataset and reports each one
 # separately from the declared constraints.
 
 invariants:

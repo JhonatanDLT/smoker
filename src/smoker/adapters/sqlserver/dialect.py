@@ -315,7 +315,7 @@ class SqlServerDialect:
             for column in table.columns:
                 if not column.identity:
                     continue
-                variable = f"@pgproof_reseed_{counter}"
+                variable = f"@smoker_reseed_{counter}"
                 counter += 1
                 name = self.quote_ident(column.name)
                 statements.append(

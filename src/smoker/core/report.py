@@ -23,7 +23,7 @@ DEFAULT_LIMITATIONS = [
     "Exclusion constraints are generated against for supported operators only.",
     (
         "CHECK constraints that cannot be parsed are enforced by the database at load time, "
-        "not pre-validated by pgproof."
+        "not pre-validated by smoker."
     ),
     "Profiles are computed from a sample, not from the full table.",
     "Application-level rules are only verified when declared in the spec file.",
@@ -78,7 +78,7 @@ class Report:
             }
         )
         return {
-            "tool": "pgproof",
+            "tool": "smoker",
             "format_version": 2,
             "verdict": self.verdict,
             "created_at": self.created_at,

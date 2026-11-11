@@ -6,8 +6,8 @@
 psycopg.OperationalError: connection failed
 ```
 
-- Check the DSN with `psql "$PGPROOF_SOURCE_DSN"`.
-- If the variable is not set, pgproof says `pass --dsn or set ...`.
+- Check the DSN with `psql "$SMOKER_SOURCE_DSN"`.
+- If the variable is not set, smoker says `pass --dsn or set ...`.
 - For Supabase, Neon or RDS, add `?sslmode=require` or `sslmode=verify-full`.
 - In Docker, `localhost` is the container, not the host. Use the service name.
 
@@ -27,7 +27,7 @@ Read it in this order:
 
 1. **Table** — where the row failed.
 2. **Constraint** — what rule broke.
-3. **Row and values** — the exact row. pgproof replays the deterministic
+3. **Row and values** — the exact row. smoker replays the deterministic
    generator to recover it.
 4. **SQLSTATE** — `23514` check, `23505` unique, `23503` foreign key.
 
@@ -50,7 +50,7 @@ The generator could not parse the predicate. Options:
 Check that the primary key is detected:
 
 ```bash
-pgproof introspect -o catalog.json
+smoker introspect -o catalog.json
 jq '.tables[] | select(.name=="your_table") | .primary_key' catalog.json
 ```
 
@@ -148,8 +148,8 @@ and the connection user's permissions.
 Collect:
 
 ```bash
-pgproof version
-pgproof introspect -o catalog.json
+smoker version
+smoker introspect -o catalog.json
 cat proof/report.json | jq '.summary, .warnings'
 ```
 

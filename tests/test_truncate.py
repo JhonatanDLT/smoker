@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Self
 
-from pgproof.adapters.postgres.writer import truncate
-from pgproof.core.ir import Table
+from smoker.adapters.postgres.writer import truncate
+from smoker.core.ir import Table
 
 
 class FakeCursor:

@@ -48,5 +48,5 @@ def test_run_step_uses_the_cli_flags_we_document() -> None:
 def test_action_never_echoes_the_dsn() -> None:
     action = load_action()
     script = "\n".join(step.get("run", "") for step in action["runs"]["steps"])
-    assert "echo $PGPROOF_SOURCE_DSN" not in script
-    assert "echo $PGPROOF_TARGET_DSN" not in script
+    assert "echo $SMOKER_SOURCE_DSN" not in script
+    assert "echo $SMOKER_TARGET_DSN" not in script

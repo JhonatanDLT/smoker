@@ -5,25 +5,25 @@ from pathlib import Path
 
 import pytest
 
-from pgproof.adapters.script import SqlFileWriter
-from pgproof.adapters.spec.yaml_loader import YamlSpecLoader
-from pgproof.adapters.sqlserver.dialect import SqlServerDialect
-from pgproof.adapters.sqlserver.introspect import _cursor, connect, introspect
-from pgproof.adapters.sqlserver.profile import profile_catalog
-from pgproof.adapters.sqlserver.query_runner import SqlServerQueryRunner
-from pgproof.adapters.sqlserver.writer import SqlServerRowWriter
-from pgproof.application.generate import GenerateDataset
-from pgproof.application.verify import VerifyDataset, VerifyRequest
-from pgproof.core.filters import filter_catalog
+from smoker.adapters.script import SqlFileWriter
+from smoker.adapters.spec.yaml_loader import YamlSpecLoader
+from smoker.adapters.sqlserver.dialect import SqlServerDialect
+from smoker.adapters.sqlserver.introspect import _cursor, connect, introspect
+from smoker.adapters.sqlserver.profile import profile_catalog
+from smoker.adapters.sqlserver.query_runner import SqlServerQueryRunner
+from smoker.adapters.sqlserver.writer import SqlServerRowWriter
+from smoker.application.generate import GenerateDataset
+from smoker.application.verify import VerifyDataset, VerifyRequest
+from smoker.core.filters import filter_catalog
 
-MSSQL_DSN = os.environ.get("PGPROOF_MSSQL_DSN")
+MSSQL_DSN = os.environ.get("SMOKER_MSSQL_DSN")
 
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.skipif(not MSSQL_DSN, reason="PGPROOF_MSSQL_DSN is not set"),
+    pytest.mark.skipif(not MSSQL_DSN, reason="SMOKER_MSSQL_DSN is not set"),
 ]
 
-SCHEMA = "pgproof_test"
+SCHEMA = "smoker_test"
 
 
 def _create_schema(connection) -> None:
@@ -138,15 +138,15 @@ def _create_rich_schema(connection) -> None:
             """
             SET QUOTED_IDENTIFIER ON;
             SET ANSI_NULLS ON;
-            IF SCHEMA_ID('pgproof_rich') IS NULL
-                EXEC('CREATE SCHEMA pgproof_rich');
-            IF OBJECT_ID('pgproof_rich.order_lines','U') IS NOT NULL
-                DROP TABLE pgproof_rich.order_lines;
-            IF OBJECT_ID('pgproof_rich.orders','U') IS NOT NULL
-                DROP TABLE pgproof_rich.orders;
-            IF OBJECT_ID('pgproof_rich.ticket_seq','SO') IS NOT NULL
-                DROP SEQUENCE pgproof_rich.ticket_seq;
-            CREATE TABLE pgproof_rich.orders (
+            IF SCHEMA_ID('smoker_rich') IS NULL
+                EXEC('CREATE SCHEMA smoker_rich');
+            IF OBJECT_ID('smoker_rich.order_lines','U') IS NOT NULL
+                DROP TABLE smoker_rich.order_lines;
+            IF OBJECT_ID('smoker_rich.orders','U') IS NOT NULL
+                DROP TABLE smoker_rich.orders;
+            IF OBJECT_ID('smoker_rich.ticket_seq','SO') IS NOT NULL
+                DROP SEQUENCE smoker_rich.ticket_seq;
+            CREATE TABLE smoker_rich.orders (
                 id int IDENTITY(1,1) NOT NULL
                     CONSTRAINT rich_orders_pk PRIMARY KEY,
                 code uniqueidentifier NOT NULL
@@ -163,7 +163,7 @@ def _create_rich_schema(connection) -> None:
                 version rowversion,
                 CONSTRAINT rich_orders_customer UNIQUE (customer)
             );
-            CREATE TABLE pgproof_rich.order_lines (
+            CREATE TABLE smoker_rich.order_lines (
                 id int IDENTITY(1,1) NOT NULL
                     CONSTRAINT rich_lines_pk PRIMARY KEY,
                 order_id int NOT NULL,
@@ -171,9 +171,9 @@ def _create_rich_schema(connection) -> None:
                     CONSTRAINT rich_lines_amount CHECK (amount > 0),
                 note nvarchar(50) NULL,
                 CONSTRAINT rich_lines_order_fk FOREIGN KEY (order_id)
-                    REFERENCES pgproof_rich.orders (id)
+                    REFERENCES smoker_rich.orders (id)
             );
-            CREATE SEQUENCE pgproof_rich.ticket_seq START WITH 100 INCREMENT BY 1;
+            CREATE SEQUENCE smoker_rich.ticket_seq START WITH 100 INCREMENT BY 1;
             """
         )
         connection.commit()
@@ -184,8 +184,8 @@ def test_sqlserver_rich_types_and_script_export(tmp_path) -> None:
     connection = connect(MSSQL_DSN)
     try:
         _create_rich_schema(connection)
-        catalog = filter_catalog(introspect(connection), schemas=["pgproof_rich"])
-        table = catalog.table("pgproof_rich.orders")
+        catalog = filter_catalog(introspect(connection), schemas=["smoker_rich"])
+        table = catalog.table("smoker_rich.orders")
         assert table.column("doubled").generated == "computed"
         assert table.column("version").generated == "rowversion"
         assert table.column("id").identity == "a"
@@ -223,46 +223,46 @@ def test_sqlserver_rich_types_and_script_export(tmp_path) -> None:
         )
     finally:
         connection.close()
-    assert profile.table("pgproof_rich.orders") is not None
-    assert profile.column("pgproof_rich.orders", "total") is not None
+    assert profile.table("smoker_rich.orders") is not None
+    assert profile.column("smoker_rich.orders", "total") is not None
 
 
 DUMP = """
-IF OBJECT_ID('pgproof_dump.v_children', 'V') IS NOT NULL DROP VIEW [pgproof_dump].[v_children];
-IF OBJECT_ID('pgproof_dump.children_guard', 'TR') IS NOT NULL DROP TRIGGER [pgproof_dump].[children_guard];
-IF OBJECT_ID('pgproof_dump.p_children', 'P') IS NOT NULL DROP PROCEDURE [pgproof_dump].[p_children];
-IF OBJECT_ID('pgproof_dump.children', 'U') IS NOT NULL DROP TABLE [pgproof_dump].[children];
-IF OBJECT_ID('pgproof_dump.parents', 'U') IS NOT NULL DROP TABLE [pgproof_dump].[parents];
-IF SCHEMA_ID('pgproof_dump') IS NOT NULL EXEC('DROP SCHEMA pgproof_dump');
+IF OBJECT_ID('smoker_dump.v_children', 'V') IS NOT NULL DROP VIEW [smoker_dump].[v_children];
+IF OBJECT_ID('smoker_dump.children_guard', 'TR') IS NOT NULL DROP TRIGGER [smoker_dump].[children_guard];
+IF OBJECT_ID('smoker_dump.p_children', 'P') IS NOT NULL DROP PROCEDURE [smoker_dump].[p_children];
+IF OBJECT_ID('smoker_dump.children', 'U') IS NOT NULL DROP TABLE [smoker_dump].[children];
+IF OBJECT_ID('smoker_dump.parents', 'U') IS NOT NULL DROP TABLE [smoker_dump].[parents];
+IF SCHEMA_ID('smoker_dump') IS NOT NULL EXEC('DROP SCHEMA smoker_dump');
 GO
-CREATE SCHEMA [pgproof_dump];
+CREATE SCHEMA [smoker_dump];
 GO
-CREATE TABLE [pgproof_dump].[parents] (
+CREATE TABLE [smoker_dump].[parents] (
     [id] int IDENTITY(1,1) NOT NULL CONSTRAINT [parents_pk] PRIMARY KEY,
     [name] nvarchar(80) NOT NULL,
     [active] bit NOT NULL DEFAULT 1
 );
 GO
-CREATE TABLE [pgproof_dump].[children] (
+CREATE TABLE [smoker_dump].[children] (
     [id] int IDENTITY(1,1) NOT NULL CONSTRAINT [children_pk] PRIMARY KEY,
     [parent_id] int NOT NULL,
     [amount] decimal(12,2) NOT NULL
         CONSTRAINT [children_amount] CHECK ([amount] >= 0),
     CONSTRAINT [children_parent_fk] FOREIGN KEY ([parent_id])
-        REFERENCES [pgproof_dump].[parents]([id])
+        REFERENCES [smoker_dump].[parents]([id])
 );
 GO
-CREATE VIEW [pgproof_dump].[v_children] AS
-    SELECT [id], [parent_id], [amount] FROM [pgproof_dump].[children];
+CREATE VIEW [smoker_dump].[v_children] AS
+    SELECT [id], [parent_id], [amount] FROM [smoker_dump].[children];
 GO
-CREATE PROCEDURE [pgproof_dump].[p_children] @min decimal(12,2) AS
+CREATE PROCEDURE [smoker_dump].[p_children] @min decimal(12,2) AS
 BEGIN
     IF @min < 0 THROW 50001, 'negative', 1;
-    SELECT [id] FROM [pgproof_dump].[children] WHERE [amount] >= @min;
+    SELECT [id] FROM [smoker_dump].[children] WHERE [amount] >= @min;
 END;
 GO
-CREATE TRIGGER [pgproof_dump].[children_guard]
-ON [pgproof_dump].[children] AFTER INSERT AS
+CREATE TRIGGER [smoker_dump].[children_guard]
+ON [smoker_dump].[children] AFTER INSERT AS
 BEGIN
     IF EXISTS (SELECT 1 FROM inserted WHERE [amount] < 0)
         THROW 50002, 'bad amount', 1;
@@ -276,10 +276,10 @@ def test_dump_loading_applies_to_sqlserver_and_generates(tmp_path) -> None:
     dump_file = tmp_path / "schema.sql"
     dump_file.write_text(DUMP, encoding="utf-8")
 
-    from pgproof.adapters.sqlserver.dump import SqlServerDumpLoader, split_batches
+    from smoker.adapters.sqlserver.dump import SqlServerDumpLoader, split_batches
 
     catalog = SqlServerDumpLoader().load(DUMP)
-    assert catalog.table("pgproof_dump.children").foreign_keys
+    assert catalog.table("smoker_dump.children").foreign_keys
     routine = next(
         item for item in catalog.functions if item.kind == "procedure"
     )
@@ -298,7 +298,7 @@ def test_dump_loading_applies_to_sqlserver_and_generates(tmp_path) -> None:
 
     live_connection = connect(MSSQL_DSN)
     try:
-        live = filter_catalog(introspect(live_connection), schemas=["pgproof_dump"])
+        live = filter_catalog(introspect(live_connection), schemas=["smoker_dump"])
     finally:
         live_connection.close()
     live_routine = next(
@@ -342,19 +342,19 @@ def test_sqlserver_range_partition_introspection_and_generation() -> None:
             cursor.execute(
                 """
                 SET QUOTED_IDENTIFIER ON;
-                IF OBJECT_ID('pgproof_parts.events','U') IS NOT NULL
-                    DROP TABLE pgproof_parts.events;
+                IF OBJECT_ID('smoker_parts.events','U') IS NOT NULL
+                    DROP TABLE smoker_parts.events;
                 IF EXISTS (SELECT 1 FROM sys.partition_schemes WHERE name='ps_events')
                     DROP PARTITION SCHEME ps_events;
                 IF EXISTS (SELECT 1 FROM sys.partition_functions WHERE name='pf_events')
                     DROP PARTITION FUNCTION pf_events;
-                IF SCHEMA_ID('pgproof_parts') IS NULL
-                    EXEC('CREATE SCHEMA pgproof_parts');
+                IF SCHEMA_ID('smoker_parts') IS NULL
+                    EXEC('CREATE SCHEMA smoker_parts');
                 CREATE PARTITION FUNCTION pf_events (int)
                     AS RANGE RIGHT FOR VALUES (100, 200, 300);
                 CREATE PARTITION SCHEME ps_events
                     AS PARTITION pf_events ALL TO ([PRIMARY]);
-                CREATE TABLE pgproof_parts.events (
+                CREATE TABLE smoker_parts.events (
                     id int IDENTITY(1,1) NOT NULL,
                     bucket int NOT NULL,
                     amount decimal(12,2) NOT NULL
@@ -365,11 +365,11 @@ def test_sqlserver_range_partition_introspection_and_generation() -> None:
                 """
             )
         connection.commit()
-        catalog = filter_catalog(introspect(connection), schemas=["pgproof_parts"])
+        catalog = filter_catalog(introspect(connection), schemas=["smoker_parts"])
     finally:
         connection.close()
 
-    table = catalog.table("pgproof_parts.events")
+    table = catalog.table("smoker_parts.events")
     assert table.is_partitioned is True
     assert table.partition_strategy == "range"
     assert table.partition_key == ["bucket"]
@@ -409,11 +409,11 @@ def test_sqlserver_filtered_unique_index() -> None:
             cursor.execute(
                 """
                 SET QUOTED_IDENTIFIER ON;
-                IF OBJECT_ID('pgproof_filtered.users','U') IS NOT NULL
-                    DROP TABLE pgproof_filtered.users;
-                IF SCHEMA_ID('pgproof_filtered') IS NULL
-                    EXEC('CREATE SCHEMA pgproof_filtered');
-                CREATE TABLE pgproof_filtered.users (
+                IF OBJECT_ID('smoker_filtered.users','U') IS NOT NULL
+                    DROP TABLE smoker_filtered.users;
+                IF SCHEMA_ID('smoker_filtered') IS NULL
+                    EXEC('CREATE SCHEMA smoker_filtered');
+                CREATE TABLE smoker_filtered.users (
                     id int IDENTITY(1,1) NOT NULL
                         CONSTRAINT filtered_pk PRIMARY KEY,
                     seat int NOT NULL
@@ -422,17 +422,17 @@ def test_sqlserver_filtered_unique_index() -> None:
                     active bit NOT NULL
                 );
                 CREATE UNIQUE INDEX uq_active_seat
-                    ON pgproof_filtered.users(seat) WHERE active = 1;
+                    ON smoker_filtered.users(seat) WHERE active = 1;
                 """
             )
         connection.commit()
         catalog = filter_catalog(
-            introspect(connection), schemas=["pgproof_filtered"]
+            introspect(connection), schemas=["smoker_filtered"]
         )
     finally:
         connection.close()
 
-    table = catalog.table("pgproof_filtered.users")
+    table = catalog.table("smoker_filtered.users")
     assert table.uniques[0].predicate is not None
 
     connection = connect(MSSQL_DSN)
@@ -457,7 +457,7 @@ def test_sqlserver_filtered_unique_index() -> None:
         with _cursor(verify_connection) as cursor:
             cursor.execute(
                 "SET QUOTED_IDENTIFIER ON; "
-                "INSERT INTO pgproof_filtered.users (seat, active) "
+                "INSERT INTO smoker_filtered.users (seat, active) "
                 "VALUES (1, 0), (1, 0);"
             )
         verify_connection.commit()
@@ -481,22 +481,22 @@ def test_sqlserver_multi_database_introspection_and_generation() -> None:
     try:
         connection.connection.autocommit = True
         with _cursor(connection) as cursor:
-            for name in ("pgproof_multi_a", "pgproof_multi_b"):
+            for name in ("smoker_multi_a", "smoker_multi_b"):
                 cursor.execute(
                     f"IF DB_ID('{name}') IS NOT NULL BEGIN "
                     f"ALTER DATABASE [{name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; "
                     f"DROP DATABASE [{name}]; END"
                 )
-            cursor.execute("CREATE DATABASE pgproof_multi_a")
-            cursor.execute("CREATE DATABASE pgproof_multi_b")
+            cursor.execute("CREATE DATABASE smoker_multi_a")
+            cursor.execute("CREATE DATABASE smoker_multi_b")
             cursor.execute(
-                "USE pgproof_multi_a; "
+                "USE smoker_multi_a; "
                 "CREATE TABLE dbo.users ("
                 "id int IDENTITY(1,1) NOT NULL CONSTRAINT multi_users_pk PRIMARY KEY, "
                 "name nvarchar(50) NOT NULL)"
             )
             cursor.execute(
-                "USE pgproof_multi_b; "
+                "USE smoker_multi_b; "
                 "CREATE TABLE dbo.orders ("
                 "id int IDENTITY(1,1) NOT NULL CONSTRAINT multi_orders_pk PRIMARY KEY, "
                 "user_id int NOT NULL, "
@@ -505,17 +505,17 @@ def test_sqlserver_multi_database_introspection_and_generation() -> None:
             )
         connection.connection.autocommit = False
         catalog = introspect(
-            connection, databases=["pgproof_multi_a", "pgproof_multi_b"]
+            connection, databases=["smoker_multi_a", "smoker_multi_b"]
         )
     finally:
         connection.close()
 
-    assert catalog.databases == ["pgproof_multi_a", "pgproof_multi_b"]
-    users = catalog.table("pgproof_multi_a.dbo.users")
-    orders = catalog.table("pgproof_multi_b.dbo.orders")
-    assert users.database == "pgproof_multi_a"
-    assert orders.database == "pgproof_multi_b"
-    assert orders.foreign_keys[0].parent_key == "pgproof_multi_a.dbo.users"
+    assert catalog.databases == ["smoker_multi_a", "smoker_multi_b"]
+    users = catalog.table("smoker_multi_a.dbo.users")
+    orders = catalog.table("smoker_multi_b.dbo.orders")
+    assert users.database == "smoker_multi_a"
+    assert orders.database == "smoker_multi_b"
+    assert orders.foreign_keys[0].parent_key == "smoker_multi_a.dbo.users"
 
     connection = connect(MSSQL_DSN)
     writer = SqlServerRowWriter(connection)
@@ -543,7 +543,7 @@ def test_sqlserver_multi_database_introspection_and_generation() -> None:
 
 def test_azure_dialect_single_database_mode() -> None:
     assert MSSQL_DSN
-    from pgproof.adapters.sqlserver.azure import AzureSqlDialect
+    from smoker.adapters.sqlserver.azure import AzureSqlDialect
 
     connection = connect(MSSQL_DSN)
     try:
@@ -576,17 +576,17 @@ def test_sqlserver_temporal_history_population() -> None:
             cursor.execute(
                 """
                 SET QUOTED_IDENTIFIER ON;
-                IF SCHEMA_ID('pgproof_temporal') IS NULL
-                    EXEC('CREATE SCHEMA pgproof_temporal');
-                IF OBJECT_ID('pgproof_temporal.accounts','U') IS NOT NULL
+                IF SCHEMA_ID('smoker_temporal') IS NULL
+                    EXEC('CREATE SCHEMA smoker_temporal');
+                IF OBJECT_ID('smoker_temporal.accounts','U') IS NOT NULL
                 BEGIN
-                    ALTER TABLE pgproof_temporal.accounts
+                    ALTER TABLE smoker_temporal.accounts
                         SET (SYSTEM_VERSIONING = OFF);
-                    IF OBJECT_ID('pgproof_temporal.accounts_history','U') IS NOT NULL
-                        DROP TABLE pgproof_temporal.accounts_history;
-                    DROP TABLE pgproof_temporal.accounts;
+                    IF OBJECT_ID('smoker_temporal.accounts_history','U') IS NOT NULL
+                        DROP TABLE smoker_temporal.accounts_history;
+                    DROP TABLE smoker_temporal.accounts;
                 END;
-                CREATE TABLE pgproof_temporal.accounts (
+                CREATE TABLE smoker_temporal.accounts (
                     id int IDENTITY(1,1) NOT NULL
                         CONSTRAINT temporal_accounts_pk PRIMARY KEY,
                     name nvarchar(80) NOT NULL,
@@ -597,24 +597,24 @@ def test_sqlserver_temporal_history_population() -> None:
                     PERIOD FOR SYSTEM_TIME (valid_from, valid_to)
                 )
                 WITH (SYSTEM_VERSIONING = ON (
-                    HISTORY_TABLE = pgproof_temporal.accounts_history
+                    HISTORY_TABLE = smoker_temporal.accounts_history
                 ));
                 """
             )
         connection.commit()
         catalog = filter_catalog(
-            introspect(connection), schemas=["pgproof_temporal"]
+            introspect(connection), schemas=["smoker_temporal"]
         )
     finally:
         connection.close()
 
-    table = catalog.table("pgproof_temporal.accounts")
+    table = catalog.table("smoker_temporal.accounts")
     assert table.temporal is not None
-    assert table.temporal.history_table == "pgproof_temporal.accounts_history"
+    assert table.temporal.history_table == "smoker_temporal.accounts_history"
     assert table.column("valid_from").generated == "system"
     assert table.column("valid_to").generated == "system"
 
-    from pgproof.adapters.sqlserver.temporal import populate_temporal_history
+    from smoker.adapters.sqlserver.temporal import populate_temporal_history
 
     connection = connect(MSSQL_DSN)
     writer = SqlServerRowWriter(connection)
@@ -628,7 +628,7 @@ def test_sqlserver_temporal_history_population() -> None:
         updated = populate_temporal_history(connection, catalog)
         with _cursor(connection) as cursor:
             cursor.execute(
-                "SELECT COUNT(*) FROM pgproof_temporal.accounts_history"
+                "SELECT COUNT(*) FROM smoker_temporal.accounts_history"
             )
             history = int(cursor.fetchone()[0])
         report = VerifyDataset(
@@ -652,8 +652,8 @@ def test_sqlserver_temporal_history_population() -> None:
 
 
 def test_sqlserver_bulk_insert(tmp_path) -> None:
-    local_dir = os.environ.get("PGPROOF_MSSQL_BULK_LOCAL")
-    server_dir = os.environ.get("PGPROOF_MSSQL_BULK_SERVER")
+    local_dir = os.environ.get("SMOKER_MSSQL_BULK_LOCAL")
+    server_dir = os.environ.get("SMOKER_MSSQL_BULK_SERVER")
     if not MSSQL_DSN or not local_dir or not server_dir:
         pytest.skip("BULK INSERT staging directories are not configured")
 
@@ -663,11 +663,11 @@ def test_sqlserver_bulk_insert(tmp_path) -> None:
             cursor.execute(
                 """
                 SET QUOTED_IDENTIFIER ON;
-                IF SCHEMA_ID('pgproof_bulk') IS NULL
-                    EXEC('CREATE SCHEMA pgproof_bulk');
-                IF OBJECT_ID('pgproof_bulk.users','U') IS NOT NULL
-                    DROP TABLE pgproof_bulk.users;
-                CREATE TABLE pgproof_bulk.users (
+                IF SCHEMA_ID('smoker_bulk') IS NULL
+                    EXEC('CREATE SCHEMA smoker_bulk');
+                IF OBJECT_ID('smoker_bulk.users','U') IS NOT NULL
+                    DROP TABLE smoker_bulk.users;
+                CREATE TABLE smoker_bulk.users (
                     id int IDENTITY(1,1) NOT NULL
                         CONSTRAINT bulk_pk PRIMARY KEY,
                     name nvarchar(80) NOT NULL,
@@ -678,11 +678,11 @@ def test_sqlserver_bulk_insert(tmp_path) -> None:
                 """
             )
         connection.commit()
-        catalog = filter_catalog(introspect(connection), schemas=["pgproof_bulk"])
+        catalog = filter_catalog(introspect(connection), schemas=["smoker_bulk"])
     finally:
         connection.close()
 
-    from pgproof.adapters.sqlserver.bulk import SqlServerBulkWriter
+    from smoker.adapters.sqlserver.bulk import SqlServerBulkWriter
 
     connection = connect(MSSQL_DSN)
     writer = SqlServerBulkWriter(
@@ -718,7 +718,7 @@ def test_sqlserver_bulk_insert(tmp_path) -> None:
 
 def test_sqlserver_temporal_overlap_is_detected() -> None:
     assert MSSQL_DSN
-    schema = "pgproof_temporal_overlap"
+    schema = "smoker_temporal_overlap"
     connection = connect(MSSQL_DSN)
     try:
         with _cursor(connection) as cursor:

@@ -6,9 +6,9 @@ uses the same engine adapter as `sqlserver` with stricter capabilities.
 ## Connection
 
 ```bash
-pip install "pgproof[sqlserver]"
+pip install "smoker[sqlserver]"
 
-export PGPROOF_AZURE_DSN="DRIVER={ODBC Driver 18 for SQL Server};SERVER=my-server.database.windows.net;DATABASE=app;UID=appuser;PWD=...;Encrypt=yes;TrustServerCertificate=no"
+export SMOKER_AZURE_DSN="DRIVER={ODBC Driver 18 for SQL Server};SERVER=my-server.database.windows.net;DATABASE=app;UID=appuser;PWD=...;Encrypt=yes;TrustServerCertificate=no"
 ```
 
 Microsoft Entra ID is passed through the ODBC connection string:
@@ -21,9 +21,9 @@ Authentication=ActiveDirectoryServicePrincipal;UID=<client-id>;PWD=<secret>
 ## Commands
 
 ```bash
-pgproof introspect --dialect azuresql --dsn-env PGPROOF_AZURE_DSN -o catalog.json
-pgproof verify     --dialect azuresql --dsn-env PGPROOF_AZURE_DSN --out proof
-pgproof generate   --dialect azuresql --source-env PGPROOF_AZURE_DSN --target-env PGPROOF_AZURE_DSN
+smoker introspect --dialect azuresql --dsn-env SMOKER_AZURE_DSN -o catalog.json
+smoker verify     --dialect azuresql --dsn-env SMOKER_AZURE_DSN --out proof
+smoker generate   --dialect azuresql --source-env SMOKER_AZURE_DSN --target-env SMOKER_AZURE_DSN
 ```
 
 `--databases` accepts only the connected database for Azure SQL. Cross-database
@@ -54,11 +54,11 @@ For an on-prem SQL Server, `--databases` builds one catalog with
 `database.schema.table` keys:
 
 ```bash
-pgproof introspect --dialect sqlserver --dsn-env PGPROOF_MSSQL_DSN \
+smoker introspect --dialect sqlserver --dsn-env SMOKER_MSSQL_DSN \
   --databases app,audit -o catalog.json
 
-pgproof generate --dialect sqlserver \
-  --source-env PGPROOF_MSSQL_DSN --target-env PGPROOF_MSSQL_DSN \
+smoker generate --dialect sqlserver \
+  --source-env SMOKER_MSSQL_DSN --target-env SMOKER_MSSQL_DSN \
   --databases app,audit --rows 1000
 ```
 

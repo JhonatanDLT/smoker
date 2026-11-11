@@ -4,9 +4,9 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from pgproof.adapters.postgres.dump import DumpLoader
-from pgproof.cli import app
-from pgproof.core.creation import creation_order
+from smoker.adapters.postgres.dump import DumpLoader
+from smoker.cli import app
+from smoker.core.creation import creation_order
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = ROOT / "examples/saas-billing/schema.sql"

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from pgproof.adapters.postgres.dialect import PostgresDialect
-from pgproof.core.invariants import (
+from smoker.adapters.postgres.dialect import PostgresDialect
+from smoker.core.invariants import (
     extract_predicate,
     infer_semantic,
     invariants_from_catalog,
     parse_local_rules,
 )
-from pgproof.core.ir import Catalog, CheckConstraint, Column, Table
+from smoker.core.ir import Catalog, CheckConstraint, Column, Table
 
 
 def test_extract_predicate_simple() -> None:

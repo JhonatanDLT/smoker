@@ -12,9 +12,9 @@ python3 -m venv .venv
 Integration tests need a live PostgreSQL:
 
 ```bash
-createdb pgproof_demo
-psql -d pgproof_demo -f examples/saas-billing/schema.sql
-PGPROOF_TEST_DSN=postgresql:///pgproof_demo .venv/bin/pytest -m integration
+createdb smoker_demo
+psql -d smoker_demo -f examples/saas-billing/schema.sql
+SMOKER_TEST_DSN=postgresql:///smoker_demo .venv/bin/pytest -m integration
 ```
 
 ## The dependency rule

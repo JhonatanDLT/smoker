@@ -13,14 +13,14 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from pgproof.adapters.postgres.dialect import PostgresDialect
-from pgproof.adapters.postgres.query_runner import PostgresQueryRunner
-from pgproof.adapters.postgres.sql_executor import PostgresSqlExecutor
-from pgproof.adapters.postgres.writer import PostgresRowWriter
-from pgproof.adapters.report import FileReportWriter, HtmlRenderer, JsonRenderer
-from pgproof.adapters.spec.yaml_loader import YamlSpecLoader
-from pgproof.core.dialect import SqlDialect
-from pgproof.core.ports import (
+from smoker.adapters.postgres.dialect import PostgresDialect
+from smoker.adapters.postgres.query_runner import PostgresQueryRunner
+from smoker.adapters.postgres.sql_executor import PostgresSqlExecutor
+from smoker.adapters.postgres.writer import PostgresRowWriter
+from smoker.adapters.report import FileReportWriter, HtmlRenderer, JsonRenderer
+from smoker.adapters.spec.yaml_loader import YamlSpecLoader
+from smoker.core.dialect import SqlDialect
+from smoker.core.ports import (
     QueryRunner,
     ReportRenderer,
     ReportWriter,
@@ -29,7 +29,7 @@ from pgproof.core.ports import (
     SqlExecutor,
 )
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "pgproof"
+SRC = Path(__file__).resolve().parents[1] / "src" / "smoker"
 CORE = SRC / "core"
 APPLICATION = SRC / "application"
 

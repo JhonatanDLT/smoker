@@ -14,7 +14,7 @@ final documents.
 
 - [ ] NDA signed if the client requires it.
 - [ ] Written authorization to read schema metadata.
-- [ ] Preferred: the client runs `pgproof introspect` and sends the JSON.
+- [ ] Preferred: the client runs `smoker introspect` and sends the JSON.
 - [ ] If a dump is shared: encrypted transfer, local copy deleted in 15 days.
 
 ## During the pilot

@@ -80,7 +80,7 @@ def connect(dsn: str) -> SqlServerConnection:
         import pyodbc
     except ImportError as exc:  # pragma: no cover - depends on the optional extra
         raise RuntimeError(
-            "SQL Server support needs pyodbc; install pgproof[sqlserver]"
+            "SQL Server support needs pyodbc; install smoker[sqlserver]"
         ) from exc
     return SqlServerConnection(pyodbc.connect(dsn))
 

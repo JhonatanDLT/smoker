@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from pgproof.application.policy import FailPolicy, should_fail
-from pgproof.core.report import Report
-from pgproof.core.verifier import InvariantResult
+from smoker.application.policy import FailPolicy, should_fail
+from smoker.core.report import Report
+from smoker.core.verifier import InvariantResult
 
 
 def report_with(*statuses: str) -> Report:

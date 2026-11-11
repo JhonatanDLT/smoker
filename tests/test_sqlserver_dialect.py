@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pgproof.adapters.registry import available_dialects, get_adapter
-from pgproof.adapters.script import SqlFileWriter
-from pgproof.adapters.sqlserver.dialect import (
+from smoker.adapters.registry import available_dialects, get_adapter
+from smoker.adapters.script import SqlFileWriter
+from smoker.adapters.sqlserver.dialect import (
     SqlServerDialect,
     strip_check_definition,
     type_text,
 )
-from pgproof.core.invariants import invariants_from_catalog
-from pgproof.core.ir import (
+from smoker.core.invariants import invariants_from_catalog
+from smoker.core.ir import (
     Catalog,
     CheckConstraint,
     Column,
@@ -181,7 +181,7 @@ def test_sql_script_writer_uses_tsql(tmp_path: Path) -> None:
 
 
 def test_bulk_text_serialization() -> None:
-    from pgproof.adapters.sqlserver.bulk import _field
+    from smoker.adapters.sqlserver.bulk import _field
 
     assert _field(None) == ""
     assert _field(True) == "1"
@@ -190,7 +190,7 @@ def test_bulk_text_serialization() -> None:
 
 
 def test_temporal_info_round_trip() -> None:
-    from pgproof.core.ir import TemporalInfo
+    from smoker.core.ir import TemporalInfo
 
     table = Table(
         schema="dbo",
@@ -211,8 +211,8 @@ def test_temporal_info_round_trip() -> None:
 
 
 def test_temporal_invariants_use_history_table() -> None:
-    from pgproof.core.invariants import InvariantKind, invariants_from_catalog
-    from pgproof.core.ir import TemporalInfo
+    from smoker.core.invariants import InvariantKind, invariants_from_catalog
+    from smoker.core.ir import TemporalInfo
 
     table = Table(
         schema="dbo",

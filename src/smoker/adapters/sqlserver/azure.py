@@ -41,7 +41,7 @@ def connect(dsn: str, attempts: int = 5) -> SqlServerConnection:
         import pyodbc
     except ImportError as exc:  # pragma: no cover - optional dependency
         raise RuntimeError(
-            "SQL Server support needs pyodbc; install pgproof[sqlserver]"
+            "SQL Server support needs pyodbc; install smoker[sqlserver]"
         ) from exc
 
     last: Exception | None = None

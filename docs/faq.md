@@ -2,7 +2,7 @@
 
 ### Is this an LLM?
 
-No. pgproof reads `pg_catalog`, extracts invariants, generates rows
+No. smoker reads `pg_catalog`, extracts invariants, generates rows
 deterministically and verifies them with SQL. There is no model in the critical
 path. A future version may use an LLM to suggest semantic names for opaque
 columns, but never to decide correctness.
@@ -10,7 +10,7 @@ columns, but never to decide correctness.
 ### Does it copy production data?
 
 No. It reads schema metadata and, optionally, aggregates from a sample
-(`pgproof profile`). The generated rows are synthetic. Categorical values from
+(`smoker profile`). The generated rows are synthetic. Categorical values from
 the profile can come from production; use `--no-values` if that matters.
 
 ### Which databases are supported?
@@ -36,13 +36,13 @@ you provide a `repair:` statement. It does not invert arbitrary SQL.
 
 ### How is it different from Faker?
 
-Faker generates plausible values. pgproof generates values that satisfy the
+Faker generates plausible values. smoker generates values that satisfy the
 schema and then **proves it** with a report. The report is the product.
 
 ### How is it different from Tonic or Delphix?
 
 Those are enterprise platforms sold to compliance teams at $18k–$250k/year.
-pgproof is a local CLI with an open core, priced for a single team, and it
+smoker is a local CLI with an open core, priced for a single team, and it
 specializes in constraint satisfaction and verification.
 
 ### Does it work offline?

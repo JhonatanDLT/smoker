@@ -17,7 +17,7 @@ def _report(results: list[dict]) -> dict:
         "total_rows": 100,
         "duration_seconds": 0.1,
         "dataset_hash": "a" * 64,
-        "reproduce": "pgproof run --rows 100",
+        "reproduce": "smoker run --rows 100",
         "summary": {
             "total": len(results),
             "passed": sum(r["status"] == "pass" for r in results),

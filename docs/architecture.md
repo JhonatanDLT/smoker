@@ -201,7 +201,7 @@ produce the same rows and the same SHA-256 digest.
 
 ### Distributions
 
-`pgproof profile` samples the source and produces `core.profile.Profile`:
+`smoker profile` samples the source and produces `core.profile.Profile`:
 null fraction, distinct count, top values and 20-bucket histograms. On tables
 above 50k rows it uses `TABLESAMPLE SYSTEM` with `REPEATABLE(seed)`; below that,
 `LIMIT`. Partitioned parents use `LIMIT` because PostgreSQL does not support
@@ -364,7 +364,7 @@ the generation space and do not fail a verification run.
 the connected writer:
 
 ```bash
-pgproof generate --schema-file db/schema.sql --rows 1000 --sql data.sql
+smoker generate --schema-file db/schema.sql --rows 1000 --sql data.sql
 ```
 
 It emits `BEGIN`, optional batched `TRUNCATE`, batched `INSERT` statements and
@@ -397,7 +397,7 @@ not depend on the order of statements in the dump.
 `CreationStep.depends_on` holds the parent table keys, source tables, functions
 or views a step needs. Foreign-key cycles are condensed and flagged with
 `cycle = True`; view cycles are broken in name order and reported as warnings.
-`pgproof order` writes the list as text or JSON, and `load-dump` and `plan`
+`smoker order` writes the list as text or JSON, and `load-dump` and `plan`
 embed the same structure.
 
 ## Exclusion constraints
@@ -520,8 +520,8 @@ dump → server → generate → verify, stored procedures, range partitions and
 profiling. The driver is optional:
 
 ```bash
-pip install "pgproof[sqlserver]"
-pgproof verify --dialect sqlserver --dsn-env PGPROOF_MSSQL_DSN
+pip install "smoker[sqlserver]"
+smoker verify --dialect sqlserver --dsn-env SMOKER_MSSQL_DSN
 ```
 
 `Capabilities` for SQL Server: `exclusion_constraints=False`,

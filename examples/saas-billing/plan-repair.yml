@@ -1,5 +1,5 @@
 # Cross-table rule with an explicit repair.
-# pgproof generates the dataset, runs the repair, then verifies the rule.
+# smoker generates the dataset, runs the repair, then verifies the rule.
 
 invariants:
   - id: invoice_total_matches_lines

@@ -13,7 +13,7 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: pgproof_demo
+          POSTGRES_DB: smoker_demo
         ports:
           - 5432:5432
         options: >-
@@ -25,17 +25,17 @@ jobs:
         image: mcr.microsoft.com/mssql/server:2022-latest
         env:
           ACCEPT_EULA: "Y"
-          MSSQL_SA_PASSWORD: "Pgproof!2026Strong"
+          MSSQL_SA_PASSWORD: "Smoker!2026Strong"
         ports:
           - 1433:1433
         options: >-
-          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Pgproof!2026Strong' -C -Q 'SELECT 1'"
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Smoker!2026Strong' -C -Q 'SELECT 1'"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 30
     env:
-      PGPROOF_TEST_DSN: postgresql://postgres:postgres@localhost:5432/pgproof_demo
-      PGPROOF_MSSQL_DSN: "DRIVER={ODBC Driver 18 for SQL Server};SERVER=127.0.0.1,1433;DATABASE=master;UID=sa;PWD=Pgproof!2026Strong;TrustServerCertificate=yes;Encrypt=yes"
+      SMOKER_TEST_DSN: postgresql://postgres:postgres@localhost:5432/smoker_demo
+      SMOKER_MSSQL_DSN: "DRIVER={ODBC Driver 18 for SQL Server};SERVER=127.0.0.1,1433;DATABASE=master;UID=sa;PWD=Smoker!2026Strong;TrustServerCertificate=yes;Encrypt=yes"
 
     steps:
       - uses: actions/checkout@v4
@@ -56,7 +56,7 @@ jobs:
           sudo apt-get update
           sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
 
-      - name: Install pgproof
+      - name: Install smoker
         run: pip install -e ".[dev,sqlserver]"
 
       - name: Lint
@@ -66,7 +66,7 @@ jobs:
         run: pytest -q -m "not integration"
 
       - name: Prepare PostgreSQL fixture
-        run: psql "$PGPROOF_TEST_DSN" -v ON_ERROR_STOP=1 -f examples/saas-billing/schema.sql
+        run: psql "$SMOKER_TEST_DSN" -v ON_ERROR_STOP=1 -f examples/saas-billing/schema.sql
 
       - name: Integration tests (PostgreSQL + SQL Server)
         run: pytest -q -m integration

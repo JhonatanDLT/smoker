@@ -56,7 +56,7 @@ Subject: `Una cosa que vi en su esquema de Postgres`
 |---|---|
 | "Faker nos basta" | "Faker genera valores plausibles, no datos que cumplan tus constraints. ¿Puedo mostrarte cuántas filas de un seed típico violan las tuyas?" |
 | "Copiamos producción, es más rápido" | "Hasta la auditoría. ¿Qué pasa si ese entorno aparece en un incidente o en una revisión de LFPDPPP?" |
-| "No podemos dar acceso al esquema" | "No lo necesito. Me pasas un dump o corres `pgproof introspect` y me mandas el JSON. El audit se hace con metadatos." |
+| "No podemos dar acceso al esquema" | "No lo necesito. Me pasas un dump o corres `smoker introspect` y me mandas el JSON. El audit se hace con metadatos." |
 | "Ya tenemos un DBA" | "Perfecto, él va a ser el primero en usar el reporte. La pregunta es si hoy puede probar que el staging cumple todas las constraints." |
 | "Es caro" | "El piloto cuesta menos que una semana de un ingeniero. Si no llegamos a cero violaciones, no pagas." |
 | "¿Esto es IA?" | "No. Es introspección del catálogo de Postgres, reglas y verificación SQL. Determinista y reproducible." |

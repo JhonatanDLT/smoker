@@ -1,4 +1,4 @@
-"""pgproof command line interface.
+"""smoker command line interface.
 
 This is the composition root: it parses arguments, wires concrete adapters to
 the use cases, and formats output. No business logic lives here.
@@ -214,7 +214,7 @@ def _report_writer(formats: str) -> FileReportWriter:
 
 
 def _command_line() -> str:
-    return "pgproof " + " ".join(sys.argv[1:])
+    return "smoker " + " ".join(sys.argv[1:])
 
 
 def _print_summary(report) -> None:
@@ -246,13 +246,13 @@ def _progress(key: str, rows: int, elapsed: float) -> None:
 @app.command()
 def version() -> None:
     """Print the version."""
-    typer.echo(f"pgproof {__version__}")
+    typer.echo(f"smoker {__version__}")
 
 
 @app.command("introspect")
 def introspect_cmd(
     dsn: str | None = typer.Option(None, "--dsn", help="DSN or environment variable name"),
-    dsn_env: str = typer.Option("PGPROOF_SOURCE_DSN", "--dsn-env"),
+    dsn_env: str = typer.Option("SMOKER_SOURCE_DSN", "--dsn-env"),
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
@@ -314,7 +314,7 @@ def load_dump_cmd(
 @app.command("order")
 def order_cmd(
     dsn: str | None = typer.Option(None, "--dsn"),
-    dsn_env: str = typer.Option("PGPROOF_SOURCE_DSN", "--dsn-env"),
+    dsn_env: str = typer.Option("SMOKER_SOURCE_DSN", "--dsn-env"),
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
@@ -374,7 +374,7 @@ def order_cmd(
 @app.command("plan")
 def plan_cmd(
     dsn: str | None = typer.Option(None, "--dsn"),
-    dsn_env: str = typer.Option("PGPROOF_SOURCE_DSN", "--dsn-env"),
+    dsn_env: str = typer.Option("SMOKER_SOURCE_DSN", "--dsn-env"),
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
@@ -432,7 +432,7 @@ def plan_cmd(
 @app.command("audit")
 def audit_cmd(
     dsn: str | None = typer.Option(None, "--dsn", help="DSN or environment variable name"),
-    dsn_env: str = typer.Option("PGPROOF_SOURCE_DSN", "--dsn-env"),
+    dsn_env: str = typer.Option("SMOKER_SOURCE_DSN", "--dsn-env"),
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
@@ -470,7 +470,7 @@ def audit_cmd(
 @app.command("profile")
 def profile_cmd(
     dsn: str | None = typer.Option(None, "--dsn", help="DSN or environment variable name"),
-    dsn_env: str = typer.Option("PGPROOF_SOURCE_DSN", "--dsn-env"),
+    dsn_env: str = typer.Option("SMOKER_SOURCE_DSN", "--dsn-env"),
     sample: int = typer.Option(1000, "--sample", help="Rows sampled per table"),
     out: Path = typer.Option(Path("profile.json"), "--out", "-o"),
     no_values: bool = typer.Option(
@@ -530,9 +530,9 @@ def profile_cmd(
 @app.command("generate")
 def generate_cmd(
     source: str | None = typer.Option(None, "--source", help="DSN or env var name"),
-    source_env: str = typer.Option("PGPROOF_SOURCE_DSN", "--source-env"),
+    source_env: str = typer.Option("SMOKER_SOURCE_DSN", "--source-env"),
     target: str | None = typer.Option(None, "--target", help="DSN or env var name"),
-    target_env: str = typer.Option("PGPROOF_TARGET_DSN", "--target-env"),
+    target_env: str = typer.Option("SMOKER_TARGET_DSN", "--target-env"),
     rows: int = typer.Option(1000, "--rows"),
     seed: int = typer.Option(42, "--seed"),
     table_rows: str | None = typer.Option(None, "--table-rows"),
@@ -661,7 +661,7 @@ def generate_cmd(
 @app.command("verify")
 def verify_cmd(
     dsn: str | None = typer.Option(None, "--dsn", help="DSN or environment variable name"),
-    dsn_env: str = typer.Option("PGPROOF_TARGET_DSN", "--dsn-env"),
+    dsn_env: str = typer.Option("SMOKER_TARGET_DSN", "--dsn-env"),
     spec: Path | None = typer.Option(None, "--spec", help="YAML file with app-level rules"),
     out: Path = typer.Option(Path("proof"), "--out", "-o"),
     sample: int = typer.Option(5, "--sample", help="Rows to show per failure"),
@@ -736,9 +736,9 @@ def verify_cmd(
 @app.command("run")
 def run_cmd(
     source: str | None = typer.Option(None, "--source", help="DSN or env var name"),
-    source_env: str = typer.Option("PGPROOF_SOURCE_DSN", "--source-env"),
+    source_env: str = typer.Option("SMOKER_SOURCE_DSN", "--source-env"),
     target: str | None = typer.Option(None, "--target", help="DSN or env var name"),
-    target_env: str = typer.Option("PGPROOF_TARGET_DSN", "--target-env"),
+    target_env: str = typer.Option("SMOKER_TARGET_DSN", "--target-env"),
     rows: int = typer.Option(1000, "--rows"),
     seed: int = typer.Option(42, "--seed"),
     table_rows: str | None = typer.Option(None, "--table-rows"),

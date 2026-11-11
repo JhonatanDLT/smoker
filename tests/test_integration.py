@@ -2,7 +2,7 @@
 
 Run with:
 
-    PGPROOF_TEST_DSN=postgresql:///pgproof_demo pytest -m integration
+    SMOKER_TEST_DSN=postgresql:///smoker_demo pytest -m integration
 
 The target schema must be the one in examples/saas-billing/schema.sql.
 """
@@ -14,30 +14,30 @@ import os
 import psycopg
 import pytest
 
-from pgproof.adapters.postgres.dialect import PostgresDialect
-from pgproof.adapters.postgres.introspect import connect, introspect, table_counts
-from pgproof.adapters.postgres.query_runner import PostgresQueryRunner
-from pgproof.adapters.postgres.writer import (
+from smoker.adapters.postgres.dialect import PostgresDialect
+from smoker.adapters.postgres.introspect import connect, introspect, table_counts
+from smoker.adapters.postgres.query_runner import PostgresQueryRunner
+from smoker.adapters.postgres.writer import (
     PostgresRowWriter,
     reset_sequences,
     truncate,
     write_table,
 )
-from pgproof.adapters.spec.yaml_loader import YamlSpecLoader
-from pgproof.application.generate import GenerateDataset
-from pgproof.application.verify import VerifyDataset, VerifyRequest
-from pgproof.core.filters import filter_catalog
-from pgproof.core.generator import Generator
-from pgproof.core.invariants import invariants_from_catalog
-from pgproof.core.planner import build_plan
-from pgproof.core.verifier import verify_all
+from smoker.adapters.spec.yaml_loader import YamlSpecLoader
+from smoker.application.generate import GenerateDataset
+from smoker.application.verify import VerifyDataset, VerifyRequest
+from smoker.core.filters import filter_catalog
+from smoker.core.generator import Generator
+from smoker.core.invariants import invariants_from_catalog
+from smoker.core.planner import build_plan
+from smoker.core.verifier import verify_all
 
 pytestmark = pytest.mark.integration
 
-DSN = os.environ.get("PGPROOF_TEST_DSN")
+DSN = os.environ.get("SMOKER_TEST_DSN")
 
 
-@pytest.mark.skipif(not DSN, reason="PGPROOF_TEST_DSN is not set")
+@pytest.mark.skipif(not DSN, reason="SMOKER_TEST_DSN is not set")
 def test_end_to_end_passes_every_invariant() -> None:
     assert DSN
     with connect(DSN) as source:
@@ -67,7 +67,7 @@ def test_end_to_end_passes_every_invariant() -> None:
     assert sum(counts.values()) == plan.total_rows
 
 
-@pytest.mark.skipif(not DSN, reason="PGPROOF_TEST_DSN is not set")
+@pytest.mark.skipif(not DSN, reason="SMOKER_TEST_DSN is not set")
 def test_same_seed_same_rows() -> None:
     assert DSN
     with connect(DSN) as source:
@@ -84,15 +84,15 @@ def test_same_seed_same_rows() -> None:
     assert first == second
 
 
-@pytest.mark.skipif(not DSN, reason="PGPROOF_TEST_DSN is not set")
+@pytest.mark.skipif(not DSN, reason="SMOKER_TEST_DSN is not set")
 def test_partial_unique_index_is_generated_and_verified() -> None:
     assert DSN
     connection = psycopg.connect(DSN)
     try:
-        connection.execute("DROP TABLE IF EXISTS public.pgproof_partial")
+        connection.execute("DROP TABLE IF EXISTS public.smoker_partial")
         connection.execute(
             """
-            CREATE TABLE public.pgproof_partial (
+            CREATE TABLE public.smoker_partial (
                 id integer PRIMARY KEY,
                 seat integer NOT NULL CHECK (seat BETWEEN 1 AND 20)
             )
@@ -100,18 +100,18 @@ def test_partial_unique_index_is_generated_and_verified() -> None:
         )
         connection.execute(
             "CREATE UNIQUE INDEX uq_partial_seat "
-            "ON public.pgproof_partial (seat) WHERE seat IS NOT NULL"
+            "ON public.smoker_partial (seat) WHERE seat IS NOT NULL"
         )
         connection.execute(
             "CREATE UNIQUE INDEX uq_partial_expr "
-            "ON public.pgproof_partial ((seat + 0)) WHERE seat IS NOT NULL"
+            "ON public.smoker_partial ((seat + 0)) WHERE seat IS NOT NULL"
         )
         connection.commit()
-        catalog = filter_catalog(introspect(connection), include=["pgproof_partial"])
+        catalog = filter_catalog(introspect(connection), include=["smoker_partial"])
     finally:
         connection.close()
 
-    table = catalog.table("public.pgproof_partial")
+    table = catalog.table("public.smoker_partial")
     seat_index = next(item for item in table.uniques if item.name == "uq_partial_seat")
     assert seat_index.columns == ["seat"]
     assert seat_index.predicate is not None
@@ -137,9 +137,9 @@ def test_partial_unique_index_is_generated_and_verified() -> None:
             VerifyRequest(dataset_hash=generated.dataset_hash, plan=generated.plan)
         )
         with connection.cursor() as cursor:
-            cursor.execute("SELECT count(DISTINCT seat) FROM public.pgproof_partial")
+            cursor.execute("SELECT count(DISTINCT seat) FROM public.smoker_partial")
             distinct = int(cursor.fetchone()[0])
-        connection.execute("DROP TABLE public.pgproof_partial")
+        connection.execute("DROP TABLE public.smoker_partial")
         connection.commit()
     finally:
         connection.close()

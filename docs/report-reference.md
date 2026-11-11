@@ -15,7 +15,7 @@ proof/
 
 | Field | Type | Description |
 |---|---|---|
-| `tool` | string | `pgproof` |
+| `tool` | string | `smoker` |
 | `format_version` | int | `2` |
 | `verdict` | string | `PASS` or `FAIL` |
 | `created_at` | ISO-8601 | UTC timestamp |
@@ -137,8 +137,8 @@ the space is defined only by the declared table constraints.
 To prove reproducibility:
 
 ```bash
-pgproof run --seed 42 --out /tmp/a
-pgproof run --seed 42 --out /tmp/b
+smoker run --seed 42 --out /tmp/a
+smoker run --seed 42 --out /tmp/b
 jq -r .dataset_hash /tmp/a/report.json
 jq -r .dataset_hash /tmp/b/report.json
 ```

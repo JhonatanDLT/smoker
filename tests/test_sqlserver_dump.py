@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from pgproof.adapters.sqlserver.dialect import SqlServerDialect
-from pgproof.adapters.sqlserver.dump import SqlServerDumpLoader, split_batches
-from pgproof.application.audit import AuditSchema
-from pgproof.core.creation import creation_order
+from smoker.adapters.sqlserver.dialect import SqlServerDialect
+from smoker.adapters.sqlserver.dump import SqlServerDumpLoader, split_batches
+from smoker.application.audit import AuditSchema
+from smoker.core.creation import creation_order
 
 DUMP = """
 CREATE SCHEMA [shop];
@@ -131,7 +131,7 @@ def test_creation_order_and_audit_include_procedures() -> None:
 def test_load_dump_cli_with_sqlserver_dialect(tmp_path) -> None:
     from typer.testing import CliRunner
 
-    from pgproof.cli import app
+    from smoker.cli import app
 
     source = tmp_path / "schema.sql"
     source.write_text(DUMP, encoding="utf-8")

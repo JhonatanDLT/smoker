@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import time
 
-from pgproof.core.invariants import Invariant, InvariantKind, InvariantStatus
-from pgproof.core.verifier import verify_all
+from smoker.core.invariants import Invariant, InvariantKind, InvariantStatus
+from smoker.core.verifier import verify_all
 
 
 class FakeRunner:

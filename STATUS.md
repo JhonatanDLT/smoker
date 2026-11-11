@@ -1,7 +1,7 @@
 # Status
 
 **Date:** 2026-11-11
-**Version:** 0.9.9
+**Version:** 0.10.0
 **State:** working v1 plus CI output, repair loop, distribution-aware
 generation, partitioned tables, offline schema dumps, segmentation rules, a
 dependency-safe creation order, SQL export, exclusion-aware generation, a
@@ -17,18 +17,18 @@ implemented but not yet tested against a live Azure instance.
 | Capability | State |
 |---|---|
 | Catalog introspection (`pg_class`, `pg_constraint`, `pg_trigger`, `pg_proc`) | ✅ |
-| **Offline schema dump loader** (`pgproof load-dump`, `--schema-file`) | ✅ |
+| **Offline schema dump loader** (`smoker load-dump`, `--schema-file`) | ✅ |
 | Functions, triggers, views and partitions from a dump | ✅ |
 | `LIKE`, `INHERITS`, `ATTACH PARTITION`, CTEs and dynamic SQL | ✅ |
 | **Inferred foreign keys** from `*_id` naming and view JOINs | ✅ |
 | **Provenance** on tables, constraints, FKs, functions, triggers and raw objects | ✅ |
 | **Segmentation extraction** (`RAISE EXCEPTION`, `NEW.col :=`, view filters) | ✅ report-only |
 | **Constraint space** defined only by table constraints; rules never change it | ✅ |
-| **SQL INSERT export** (`pgproof generate --sql`) from a dump, no database | ✅ |
+| **SQL INSERT export** (`smoker generate --sql`) from a dump, no database | ✅ |
 | **Rules in the report** (`rules[]`, HTML table) and per-invariant provenance | ✅ |
 | **View filters** classified as aggregate candidates (never applied as checks) | ✅ |
 | **Exclusion constraints** parsed, verified and generated against | ✅ |
-| **Dependency-safe creation order** (`pgproof order`) | ✅ |
+| **Dependency-safe creation order** (`smoker order`) | ✅ |
 | **Dialect layer** (`SqlDialect`, `Capabilities`, registry) | ✅ |
 | **`DatabaseAdapter` aggregate** (dialect + connection factories) | ✅ |
 | **SQL Server dialect, introspection, query runner and writer** (experimental, verified) | ✅ |
@@ -66,9 +66,9 @@ implemented but not yet tested against a live Azure instance.
 | `--fail-on never/error/fail` (shadow mode) | ✅ |
 | **GitHub Action** with annotations and job summary | ✅ |
 | **CI matrix** with PostgreSQL 16 + SQL Server 2022 service containers | ✅ |
-| **Schema readiness audit** (`pgproof audit`) | ✅ |
+| **Schema readiness audit** (`smoker audit`) | ✅ |
 | **Repair loop** with fixed-point limit and residual reporting | ✅ |
-| **Distribution profiling** (`pgproof profile`) and profile-aware generation | ✅ |
+| **Distribution profiling** (`smoker profile`) and profile-aware generation | ✅ |
 | **TABLESAMPLE** sampling and date/timestamp histograms | ✅ |
 | Dataset SHA-256 (recomputed after repairs) | ✅ |
 | CLI: `introspect`, `load-dump`, `profile`, `plan`, `generate`, `verify`, `run` | ✅ |
@@ -114,7 +114,7 @@ implemented but not yet tested against a live Azure instance.
   not change the generation space; the trigger itself is still not replayed.
 - **SQL export:** a dump with two tables generated 7 deterministic rows into a
   `.sql` file; `psql -f` loaded them with zero orphan foreign keys.
-- Creation order: `pgproof order` lists extensions, enums, types, domains,
+- Creation order: `smoker order` lists extensions, enums, types, domains,
   sequences, tables (FK order), functions, indexes, triggers, views, rules and
   policies, with `depends_on` per step.
 - `load-dump` and `plan` now include `creation_order` in their JSON output.
@@ -128,7 +128,7 @@ implemented but not yet tested against a live Azure instance.
   dump loader, profiler and range partitions are implemented and registered as
   `--dialect sqlserver`; integration tests run against SQL Server 2022
   Developer.
-- **170 tests passing** with both `PGPROOF_TEST_DSN` and `PGPROOF_MSSQL_DSN`:
+- **170 tests passing** with both `SMOKER_TEST_DSN` and `SMOKER_MSSQL_DSN`:
   PostgreSQL 16 plus SQL Server 2022 Developer in a container.
 - SQL Server integration covers source introspection, verification, generation,
   identity/computed/rowversion, `varbinary`/`uniqueidentifier`/`datetime2`,
@@ -146,30 +146,30 @@ contributing and the pilot playbook.
 ## How to run it
 
 ```bash
-cd pgproof
+cd smoker
 python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 
 make demo        # billing demo, opens proof/report.html
 make fixtures    # ecommerce, multi-tenant CRM, analytics
 make test
-PGPROOF_TEST_DSN=postgresql:///pgproof_demo .venv/bin/pytest -m integration
+SMOKER_TEST_DSN=postgresql:///smoker_demo .venv/bin/pytest -m integration
 ```
 
 Repair demo:
 
 ```bash
-PGPROOF_SOURCE_DSN=postgresql:///pgproof_demo \
-PGPROOF_TARGET_DSN=postgresql:///pgproof_demo \
-  .venv/bin/pgproof run --rows 50 \
+SMOKER_SOURCE_DSN=postgresql:///smoker_demo \
+SMOKER_TARGET_DSN=postgresql:///smoker_demo \
+  .venv/bin/smoker run --rows 50 \
   --spec examples/saas-billing/plan-repair.yml --out proof
 ```
 
 Distribution demo:
 
 ```bash
-pgproof profile --dsn-env PGPROOF_SOURCE_DSN --sample 10000 -o profile.json
-pgproof run --profile profile.json --rows 5000 --out proof
+smoker profile --dsn-env SMOKER_SOURCE_DSN --sample 10000 -o profile.json
+smoker run --profile profile.json --rows 5000 --out proof
 ```
 
 ## Architecture

@@ -1,4 +1,4 @@
--- pgproof demo schema: a small SaaS billing system.
+-- smoker demo schema: a small SaaS billing system.
 -- Ten tables, enums, checks, a self-reference, a trigger, and a derived column.
 
 DROP SCHEMA IF EXISTS billing CASCADE;

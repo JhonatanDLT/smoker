@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from pgproof.core.ir import (
+from smoker.core.ir import (
     Catalog,
     Column,
     ForeignKey,
@@ -47,7 +47,7 @@ def catalog() -> Catalog:
         ],
     )
     return Catalog(
-        database="pgproof_test",
+        database="smoker_test",
         server_version="16.0",
         tables=[accounts, users],
     )
@@ -96,7 +96,7 @@ def cyclic_catalog() -> Catalog:
         ],
     )
     return Catalog(
-        database="pgproof_test",
+        database="smoker_test",
         server_version="16.0",
         tables=[left, right],
     )

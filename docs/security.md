@@ -1,6 +1,6 @@
 # Security
 
-## What pgproof touches
+## What smoker touches
 
 | System | Access | Why |
 |---|---|---|
@@ -30,7 +30,7 @@ If a DSN leaks:
 
 ## Profiles and PII
 
-`pgproof profile` stores:
+`smoker profile` stores:
 
 - Null fraction, distinct count and histograms (aggregates).
 - Top values for low-cardinality columns (raw values).
@@ -55,7 +55,7 @@ still be sensitive. If that matters, use `--no-values`.
 
 ## Target safety
 
-- pgproof truncates the target tables in the plan before writing. This is
+- smoker truncates the target tables in the plan before writing. This is
   destructive by design.
 - Never point the target at production.
 - The CLI warns when source and target are the same database.
@@ -68,9 +68,9 @@ still be sensitive. If that matters, use `--no-values`.
 Source role:
 
 ```sql
-GRANT CONNECT ON DATABASE app TO pgproof_reader;
-GRANT USAGE ON SCHEMA public TO pgproof_reader;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO pgproof_reader;
+GRANT CONNECT ON DATABASE app TO smoker_reader;
+GRANT USAGE ON SCHEMA public TO smoker_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO smoker_reader;
 ```
 
 Target role needs `TRUNCATE`, `INSERT`, `UPDATE` and sequence usage.
@@ -102,7 +102,7 @@ confidential: treat `report.json`, `catalog.json` and `plan.json` as internal.
 
 ### Do I need a live database?
 
-No for schema understanding: `pgproof load-dump db/schema.sql` builds the
+No for schema understanding: `smoker load-dump db/schema.sql` builds the
 catalog from a `.sql` dump. Yes for generation and verification: you still need
 a target PostgreSQL database to load the rows and run the checks.
 

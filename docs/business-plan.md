@@ -1,4 +1,4 @@
-# Business plan — pgproof
+# Business plan — smoker
 
 **Status:** working draft, November 2026.
 **Product:** synthetic Postgres data with a verifiable certificate.
@@ -14,7 +14,7 @@ organizations. The middle is empty and it is where the money is:
 
 > **Teams that need provably valid test data, without a six-figure contract.**
 
-pgproof does not sell "realistic data". It sells **a dataset that loads, plus a
+smoker does not sell "realistic data". It sells **a dataset that loads, plus a
 report that proves it**. The generator is the means; the certificate is the
 product.
 

@@ -9,22 +9,22 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from pgproof.adapters.postgres.dialect import PostgresDialect
-from pgproof.adapters.postgres.introspect import connect, introspect
-from pgproof.adapters.postgres.profile import profile_catalog
-from pgproof.adapters.postgres.query_runner import PostgresQueryRunner
-from pgproof.adapters.postgres.writer import PostgresRowWriter
-from pgproof.adapters.spec.yaml_loader import YamlSpecLoader
-from pgproof.application.generate import GenerateDataset
-from pgproof.application.verify import VerifyDataset, VerifyRequest
+from smoker.adapters.postgres.dialect import PostgresDialect
+from smoker.adapters.postgres.introspect import connect, introspect
+from smoker.adapters.postgres.profile import profile_catalog
+from smoker.adapters.postgres.query_runner import PostgresQueryRunner
+from smoker.adapters.postgres.writer import PostgresRowWriter
+from smoker.adapters.spec.yaml_loader import YamlSpecLoader
+from smoker.application.generate import GenerateDataset
+from smoker.application.verify import VerifyDataset, VerifyRequest
 
 pytestmark = pytest.mark.integration
 
-DSN = os.environ.get("PGPROOF_TEST_DSN")
+DSN = os.environ.get("SMOKER_TEST_DSN")
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.skipif(not DSN, reason="PGPROOF_TEST_DSN is not set")
+@pytest.mark.skipif(not DSN, reason="SMOKER_TEST_DSN is not set")
 def test_profile_reproduces_the_source_skew() -> None:
     assert DSN
     subprocess.run(

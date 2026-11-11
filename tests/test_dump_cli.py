@@ -5,7 +5,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from pgproof.cli import app
+from smoker.cli import app
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = ROOT / "examples/saas-billing/schema.sql"

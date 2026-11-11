@@ -6,8 +6,8 @@ minutes.
 ## Generate it
 
 ```bash
-export PGPROOF_SOURCE_DSN=postgresql://readonly@host/db
-pgproof audit --dsn-env PGPROOF_SOURCE_DSN --out audit.md
+export SMOKER_SOURCE_DSN=postgresql://readonly@host/db
+smoker audit --dsn-env SMOKER_SOURCE_DSN --out audit.md
 ```
 
 If the client cannot give a connection, ask for a schema dump and load it into a
@@ -17,7 +17,7 @@ local Postgres, then run the same command against the local copy.
 
 1. **Header** — database, PostgreSQL version, verdict (high / medium / low risk).
 2. **Inventory** — tables, columns, foreign keys, checks, triggers.
-3. **What pgproof would verify** — counts by invariant kind.
+3. **What smoker would verify** — counts by invariant kind.
 4. **Risks** — severity, table, finding. This is the part the buyer reads.
 5. **Next step** — the two-week pilot.
 

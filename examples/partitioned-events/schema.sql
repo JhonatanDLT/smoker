@@ -1,6 +1,6 @@
 -- Fixture: partitioned tables.
 -- One range-partitioned table, one list-partitioned table and one
--- hash-partitioned table. pgproof must generate into the parent and let
+-- hash-partitioned table. smoker must generate into the parent and let
 -- PostgreSQL route each row.
 
 DROP SCHEMA IF EXISTS part CASCADE;

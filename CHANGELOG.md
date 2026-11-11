@@ -1,8 +1,23 @@
 # Changelog
 
-All notable changes to pgproof. The format follows
+All notable changes to smoker. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
+
+## [0.10.0] — 2026-11-11
+
+### Changed
+
+- **Renamed the project from `pgproof` to `smoker`.**
+  - Python package, CLI entry point, GitHub Action, environment variables
+    (`SMOKER_*`), report labels, documentation and examples now use the new
+    name.
+  - The rule engine, dialects, adapters and report formats are unchanged.
+  - Existing databases and test schemas were renamed for consistency.
+
+### Measured
+
+- 170 tests; all pass with PostgreSQL 16 and SQL Server 2022 Developer.
 
 ## [0.9.9] — 2026-11-11
 
@@ -73,7 +88,7 @@ versioning.
     shared volumes and Docker.
   - Azure SQL rejects it (`bulk_insert_from_file=False`).
 - SQL Server integration tests for temporal history and BULK INSERT (the latter
-  gated by `PGPROOF_MSSQL_BULK_LOCAL`/`PGPROOF_MSSQL_BULK_SERVER`).
+  gated by `SMOKER_MSSQL_BULK_LOCAL`/`SMOKER_MSSQL_BULK_SERVER`).
 
 ### Measured
 
@@ -210,7 +225,7 @@ container (`mcr.microsoft.com/mssql/server:2022-latest`) on an x86_64 Colima VM.
 
 ### Measured
 
-- 141 tests; all pass with `PGPROOF_TEST_DSN` and `PGPROOF_MSSQL_DSN` set.
+- 141 tests; all pass with `SMOKER_TEST_DSN` and `SMOKER_MSSQL_DSN` set.
 
 ## [0.9.0] — 2026-11-11
 
@@ -229,8 +244,8 @@ container (`mcr.microsoft.com/mssql/server:2022-latest`) on an x86_64 Colima VM.
     FK-aware delete order and reseed.
   - `adapters/sqlserver/sql_executor.py` for repair statements.
   - Registered as `--dialect sqlserver`; the optional dependency is
-    `pgproof[sqlserver]`.
-- Integration tests gated by `PGPROOF_MSSQL_DSN` for source verification and
+    `smoker[sqlserver]`.
+- Integration tests gated by `SMOKER_MSSQL_DSN` for source verification and
   generation.
 - T-SQL dialect contract tests (rendering, types, scripts) that run without a
   SQL Server instance.
@@ -240,7 +255,7 @@ container (`mcr.microsoft.com/mssql/server:2022-latest`) on an x86_64 Colima VM.
 - T-SQL dump loading is a clear `NotImplementedError`; use a live connection.
 - SQL Server profiling is a clear `NotImplementedError`.
 - SQL Server integration has not run in this environment; it is exercised when
-  `PGPROOF_MSSQL_DSN` is set.
+  `SMOKER_MSSQL_DSN` is set.
 - SQL Server partitioning is inventoried as raw objects, not mapped to the
   partition tree yet.
 
@@ -329,7 +344,7 @@ container (`mcr.microsoft.com/mssql/server:2022-latest`) on an x86_64 Colima VM.
 ### Added
 
 - **SQL INSERT export** without a database:
-  `pgproof generate --schema-file db/schema.sql --rows 1000 --sql data.sql`.
+  `smoker generate --schema-file db/schema.sql --rows 1000 --sql data.sql`.
   The file contains `BEGIN`, optional batched `TRUNCATE`, batched `INSERT`
   statements, `setval` calls for identity columns and `COMMIT`.
 - `sql_literal` for safe SQL value rendering.
@@ -344,7 +359,7 @@ container (`mcr.microsoft.com/mssql/server:2022-latest`) on an x86_64 Colima VM.
 
 ### Added
 
-- **Dependency-safe creation order** (`pgproof order`):
+- **Dependency-safe creation order** (`smoker order`):
   extensions → enums → types → domains → sequences → tables (FK order) →
   functions → indexes → triggers → views → materialized views → rules →
   policies → comments/grants.
@@ -426,7 +441,7 @@ container (`mcr.microsoft.com/mssql/server:2022-latest`) on an x86_64 Colima VM.
 
 ### Added
 
-- **Offline schema dump loader.** `pgproof load-dump db/schema.sql` builds the
+- **Offline schema dump loader.** `smoker load-dump db/schema.sql` builds the
   catalog from a `.sql` file: tables, columns, constraints, enums, domains,
   partitions, functions, triggers, views and simple unique indexes.
 - **`--schema-file`** on `plan`, `audit`, `generate`, `verify` and `run`. The
@@ -461,7 +476,7 @@ container (`mcr.microsoft.com/mssql/server:2022-latest`) on an x86_64 Colima VM.
   generator flattens it into leaf paths and satisfies every level's bounds.
 - **Trigger function deduplication.** Function bodies are stored once per OID;
   triggers reference them by `function_oid`.
-- `pgproof audit` and `pgproof profile` honor the catalog filters.
+- `smoker audit` and `smoker profile` honor the catalog filters.
 
 ### Measured
 
@@ -480,7 +495,7 @@ container (`mcr.microsoft.com/mssql/server:2022-latest`) on an x86_64 Colima VM.
   `LIMIT` is used.
 - **Date, timestamp and time histograms.** Buckets are computed on a numeric
   axis and converted back during generation (`bucket_kind` in the profile).
-- `--sample-method` and `--sample-seed` on `pgproof profile`.
+- `--sample-method` and `--sample-seed` on `smoker profile`.
 - `sample_method`, `sample_pct` and `bucket_kind` in the profile JSON.
 
 ### Measured
@@ -538,11 +553,11 @@ container (`mcr.microsoft.com/mssql/server:2022-latest`) on an x86_64 Colima VM.
 - **`--fail-on never|error|fail`** policy, including shadow mode.
 - **Repair loop**: the spec accepts `repair:` and the pipeline runs
   generate → repair → verify with a fixed-point limit (`--max-passes`).
-- **`pgproof profile`**: per-column null fraction, distinct count, top values
+- **`smoker profile`**: per-column null fraction, distinct count, top values
   and 20-bucket histograms.
 - **Distribution-aware generation** via `--profile` (categorical, numeric and
   boolean), with constraint safety.
-- **`pgproof audit`**: Markdown schema readiness audit for pilots.
+- **`smoker audit`**: Markdown schema readiness audit for pilots.
 - **GitHub Action** (`action.yml`) with annotations and job summary.
 - Report `format_version: 2` with a `repairs` section.
 - Dataset digest recomputed from the target after repairs.

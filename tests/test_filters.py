@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pgproof.core.filters import filter_catalog, split_patterns
-from pgproof.core.ir import Catalog, Table
+from smoker.core.filters import filter_catalog, split_patterns
+from smoker.core.ir import Catalog, Table
 
 
 def make_catalog() -> Catalog:

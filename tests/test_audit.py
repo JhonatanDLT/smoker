@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from pgproof.adapters.postgres.dialect import PostgresDialect
-from pgproof.adapters.report.audit_markdown import AuditMarkdownRenderer
-from pgproof.application.audit import AuditSchema
-from pgproof.core.ir import Catalog, CheckConstraint, Column, ForeignKey, Table, Trigger
+from smoker.adapters.postgres.dialect import PostgresDialect
+from smoker.adapters.report.audit_markdown import AuditMarkdownRenderer
+from smoker.application.audit import AuditSchema
+from smoker.core.ir import Catalog, CheckConstraint, Column, ForeignKey, Table, Trigger
 
 
 def make_catalog() -> Catalog:
@@ -80,6 +80,6 @@ def test_audit_markdown_contains_the_sections() -> None:
 
     assert "# Schema readiness audit" in markdown
     assert "## Inventory" in markdown
-    assert "## What pgproof would verify" in markdown
+    assert "## What smoker would verify" in markdown
     assert "## Risks" in markdown
     assert "public.imports" in markdown

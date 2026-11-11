@@ -3,13 +3,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "pgproof"
-version = "0.9.9"
+name = "smoker"
+version = "0.10.0"
 description = "Synthetic Postgres data that ships with proof."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
-authors = [{ name = "pgproof" }]
+authors = [{ name = "smoker" }]
 dependencies = [
   "psycopg[binary]>=3.1",
   "sqlglot>=25",
@@ -27,16 +27,16 @@ dev = [
 ]
 
 [project.scripts]
-pgproof = "pgproof.cli:app"
+smoker = "smoker.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pgproof"]
+packages = ["src/smoker"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
 markers = [
-  "integration: requires a live PostgreSQL (set PGPROOF_TEST_DSN)",
+  "integration: requires a live PostgreSQL (set SMOKER_TEST_DSN)",
 ]
 
 [tool.ruff]
@@ -45,4 +45,4 @@ target-version = "py311"
 
 [tool.ruff.lint.per-file-ignores]
 # Typer's documented API uses function calls in argument defaults.
-"src/pgproof/cli.py" = ["B008"]
+"src/smoker/cli.py" = ["B008"]

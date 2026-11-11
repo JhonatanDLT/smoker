@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>pgproof — synthetic Postgres data that ships with proof</title>
+<title>smoker — synthetic Postgres data that ships with proof</title>
 <style>
   :root {
     --paper: #FAFAF7; --ink: #101418; --rule: #D9D9D2; --muted: #5B6470;
@@ -43,7 +43,7 @@
 
   <h1>Synthetic Postgres data that ships with proof.</h1>
   <p class="sub">
-    pgproof reads your schema, generates rows, and verifies every constraint it can find.
+    smoker reads your schema, generates rows, and verifies every constraint it can find.
     The output is a report you can hand to a reviewer or an auditor — including what it could not verify.
   </p>
   <a class="cta" href="#install">Install the CLI</a>
@@ -57,14 +57,14 @@
     or a demo that dies on stage.
   </p>
   <p>
-    pgproof treats the schema as the specification. It reads <code>pg_catalog</code>,
+    smoker treats the schema as the specification. It reads <code>pg_catalog</code>,
     turns constraints into invariants, generates rows that satisfy them, and then proves it.
   </p>
 
   <h2>It reads your schema. You do not describe it twice.</h2>
-  <pre><code>$ pgproof run --rows 400000 --seed 42 --out proof
+  <pre><code>$ smoker run --rows 400000 --seed 42 --out proof
 
-pgproof 0.1.0 · 14 tables · 400,000 rows · seed 42
+smoker 0.1.0 · 14 tables · 400,000 rows · seed 42
   generate billing.accounts            12,000 rows   0.31s
   generate billing.invoices            48,000 rows   1.84s
   generate billing.invoice_lines      180,000 rows   6.02s
@@ -93,12 +93,12 @@ report proof/report.html   digest sha256:bc4ba84a…</code></pre>
   </p>
 
   <h2 id="install">Install</h2>
-  <pre><code>pipx install pgproof
+  <pre><code>pipx install smoker
 
-export PGPROOF_SOURCE_DSN=postgresql:///myapp
-export PGPROOF_TARGET_DSN=postgresql:///myapp_test
+export SMOKER_SOURCE_DSN=postgresql:///myapp
+export SMOKER_TARGET_DSN=postgresql:///myapp_test
 
-pgproof run --rows 5000 --seed 42 --spec plan.yml --out proof</code></pre>
+smoker run --rows 5000 --seed 42 --spec plan.yml --out proof</code></pre>
   <p class="note">Requires Python 3.11+ and PostgreSQL 14–17. Runs fully offline.</p>
 
   <h2>Price</h2>
@@ -109,7 +109,7 @@ pgproof run --rows 5000 --seed 42 --spec plan.yml --out proof</code></pre>
   <p><a href="#">Read the limitations</a> · <a href="#">Security</a> · <a href="#">Changelog</a></p>
 
   <footer>
-    pgproof. Synthetic data is not production data. The report says exactly what was checked.
+    smoker. Synthetic data is not production data. The report says exactly what was checked.
   </footer>
 </main>
 </body>

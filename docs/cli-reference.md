@@ -1,7 +1,7 @@
 # CLI reference
 
 ```
-pgproof [COMMAND] [OPTIONS]
+smoker [COMMAND] [OPTIONS]
 ```
 
 ## Conventions
@@ -16,9 +16,9 @@ Every command accepts `--dsn` or `--dsn-env`.
 
 | Command | Default variable |
 |---|---|
-| `introspect`, `audit`, `profile`, `plan`, `order` | `PGPROOF_SOURCE_DSN` |
-| `verify` | `PGPROOF_TARGET_DSN` |
-| `generate`, `run` | `PGPROOF_SOURCE_DSN` and `PGPROOF_TARGET_DSN` |
+| `introspect`, `audit`, `profile`, `plan`, `order` | `SMOKER_SOURCE_DSN` |
+| `verify` | `SMOKER_TARGET_DSN` |
+| `generate`, `run` | `SMOKER_SOURCE_DSN` and `SMOKER_TARGET_DSN` |
 
 **Prefer environment variables over `--dsn`.** The command line is copied into
 the report's `reproduce` field; a DSN passed as a flag would end up in the
@@ -37,7 +37,7 @@ They apply to `introspect`, `audit`, `profile`, `plan`, `order`, `generate`, `ve
 | `--exclude` | Same, but removes matches |
 
 ```bash
-pgproof run --schema billing --exclude "*.audit_*" --out proof
+smoker run --schema billing --exclude "*.audit_*" --out proof
 ```
 
 Patterns are shell globs. `billing.*` matches every table in `billing`;
@@ -52,11 +52,11 @@ Patterns are shell globs. `billing.*` matches every table in `billing`;
 - `azuresql` (managed service; single database, no `USE`/cross-database)
 
 ```bash
-pip install "pgproof[sqlserver]"
-pgproof verify --dialect sqlserver --dsn-env PGPROOF_MSSQL_DSN
-pgproof verify --dialect azuresql --dsn-env PGPROOF_AZURE_DSN
-pgproof generate --dialect sqlserver --databases app,audit \
-  --source-env PGPROOF_MSSQL_DSN --target-env PGPROOF_MSSQL_DSN
+pip install "smoker[sqlserver]"
+smoker verify --dialect sqlserver --dsn-env SMOKER_MSSQL_DSN
+smoker verify --dialect azuresql --dsn-env SMOKER_AZURE_DSN
+smoker generate --dialect sqlserver --databases app,audit \
+  --source-env SMOKER_MSSQL_DSN --target-env SMOKER_MSSQL_DSN
 ```
 
 `--databases app,audit` or `--databases '*'` builds a multi-database catalog for
@@ -79,31 +79,31 @@ pending. The extension point is documented in
 
 ---
 
-## `pgproof version`
+## `smoker version`
 
 Prints the version.
 
 ---
 
-## `pgproof introspect`
+## `smoker introspect`
 
 Reads the catalog and writes JSON.
 
 | Option | Default | Description |
 |---|---|---|
 | `--dsn` | — | DSN or env var name |
-| `--dsn-env` | `PGPROOF_SOURCE_DSN` | Env var with the DSN |
+| `--dsn-env` | `SMOKER_SOURCE_DSN` | Env var with the DSN |
 | `--out`, `-o` | `catalog.json` | Output file |
 
 ```bash
-pgproof introspect --dsn-env PGPROOF_SOURCE_DSN -o catalog.json
+smoker introspect --dsn-env SMOKER_SOURCE_DSN -o catalog.json
 ```
 
 The catalog is a reusable input for `plan` and `verify` via `--catalog`.
 
 ---
 
-## `pgproof load-dump`
+## `smoker load-dump`
 
 Builds the catalog from a schema dump (`.sql`) without a database connection.
 
@@ -116,13 +116,13 @@ Builds the catalog from a schema dump (`.sql`) without a database connection.
 | `--exclude` | — | Comma-separated globs |
 
 ```bash
-pgproof load-dump db/schema.sql -o catalog.json
+smoker load-dump db/schema.sql -o catalog.json
 ```
 
 The JSON also contains `creation_order`, the dependency-safe order described
-under `pgproof order`.
+under `smoker order`.
 
-## `pgproof order`
+## `smoker order`
 
 Prints the creation and insertion order for a catalog: extensions, enums,
 types, domains, sequences, tables in foreign-key order, functions, indexes,
@@ -131,38 +131,38 @@ triggers, views, rules and policies.
 | Option | Default | Description |
 |---|---|---|
 | `--schema-file` | — | Build the catalog from a `.sql` dump |
-| `--dsn`, `--dsn-env` | `PGPROOF_SOURCE_DSN` | Live source instead of a dump |
+| `--dsn`, `--dsn-env` | `SMOKER_SOURCE_DSN` | Live source instead of a dump |
 | `--format` | `text` | `text` or `json` |
 | `--out`, `-o` | `order.txt` | Output file; use `-` for stdout |
 
 ```bash
-pgproof order --schema-file db/schema.sql -o -
-pgproof order --schema-file db/schema.sql --format json -o order.json
+smoker order --schema-file db/schema.sql -o -
+smoker order --schema-file db/schema.sql --format json -o order.json
 ```
 
 Text output marks steps inside a foreign-key cycle with `!` and shows
 dependencies after `<-`.
 
-## `pgproof audit`
+## `smoker audit`
 
 Produces a Markdown schema readiness audit. Reads metadata only, no rows.
 
 | Option | Default | Description |
 |---|---|---|
 | `--dsn` | — | DSN or env var name |
-| `--dsn-env` | `PGPROOF_SOURCE_DSN` | Env var with the DSN |
+| `--dsn-env` | `SMOKER_SOURCE_DSN` | Env var with the DSN |
 | `--schema-file` | — | Build the catalog from a `.sql` dump instead of a live source |
 | `--out`, `-o` | `audit.md` | Output file |
 
 ```bash
-pgproof audit --dsn-env PGPROOF_SOURCE_DSN --out audit.md
+smoker audit --dsn-env SMOKER_SOURCE_DSN --out audit.md
 ```
 
 The audit lists inventory, verifiable invariants, and risks by severity.
 
 ---
 
-## `pgproof profile`
+## `smoker profile`
 
 Samples the source and saves per-column aggregates for distribution-aware
 generation.
@@ -170,7 +170,7 @@ generation.
 | Option | Default | Description |
 |---|---|---|
 | `--dsn` | — | DSN or env var name |
-| `--dsn-env` | `PGPROOF_SOURCE_DSN` | Env var with the DSN |
+| `--dsn-env` | `SMOKER_SOURCE_DSN` | Env var with the DSN |
 | `--sample` | `1000` | Rows sampled per table |
 | `--sample-method` | `auto` | `auto`, `limit`, `system` or `bernoulli` |
 | `--sample-seed` | `42` | Seed for `REPEATABLE` sampling |
@@ -178,7 +178,7 @@ generation.
 | `--no-values` | off | Omit top values for PII-sensitive schemas |
 
 ```bash
-pgproof profile --dsn-env PGPROOF_SOURCE_DSN --sample 10000 -o profile.json
+smoker profile --dsn-env SMOKER_SOURCE_DSN --sample 10000 -o profile.json
 ```
 
 `auto` uses `LIMIT` below 50k rows and `TABLESAMPLE SYSTEM` above it. Partitioned
@@ -191,37 +191,37 @@ histograms. It is an artifact: keep it out of public repositories.
 
 ---
 
-## `pgproof plan`
+## `smoker plan`
 
 Builds a generation plan without touching data.
 
 | Option | Default | Description |
 |---|---|---|
 | `--dsn` | — | DSN or env var name |
-| `--dsn-env` | `PGPROOF_SOURCE_DSN` | Env var with the DSN |
+| `--dsn-env` | `SMOKER_SOURCE_DSN` | Env var with the DSN |
 | `--rows` | `1000` | Default rows per table |
 | `--seed` | `42` | Deterministic seed |
 | `--table-rows` | — | Per-table overrides: `users=5000,plans=5` |
 | `--out`, `-o` | `plan.json` | Output file |
 
 ```bash
-pgproof plan --rows 10000 --table-rows "billing.plans=10" -o plan.json
+smoker plan --rows 10000 --table-rows "billing.plans=10" -o plan.json
 ```
 
 Prints warnings for foreign-key cycles and tables without a primary key.
 
 ---
 
-## `pgproof generate`
+## `smoker generate`
 
 Generates rows into the target database, or into a `.sql` file. Does not verify.
 
 | Option | Default | Description |
 |---|---|---|
 | `--source` | — | Source DSN or env var name |
-| `--source-env` | `PGPROOF_SOURCE_DSN` | Source env var |
+| `--source-env` | `SMOKER_SOURCE_DSN` | Source env var |
 | `--target` | — | Target DSN or env var name |
-| `--target-env` | `PGPROOF_TARGET_DSN` | Target env var |
+| `--target-env` | `SMOKER_TARGET_DSN` | Target env var |
 | `--schema-file` | — | Build the catalog from a `.sql` dump; the source DSN becomes optional |
 | `--sql` | — | Write `INSERT` statements to this file instead of a target database |
 | `--rows` | `1000` | Default rows per table |
@@ -233,11 +233,11 @@ Generates rows into the target database, or into a `.sql` file. Does not verify.
 | `--bulk-local-dir` | — | Client directory mapped to `--bulk-dir` |
 | `--temporal-history` | off | Update temporal tables to create history rows |
 | `--catalog` | — | Reuse a saved catalog JSON |
-| `--profile` | — | Profile JSON from `pgproof profile` |
+| `--profile` | — | Profile JSON from `smoker profile` |
 
 ```bash
-pgproof generate --rows 5000 --seed 42 --profile profile.json
-pgproof generate --schema-file db/schema.sql --rows 1000 --sql data.sql
+smoker generate --rows 5000 --seed 42 --profile profile.json
+smoker generate --schema-file db/schema.sql --rows 1000 --sql data.sql
 psql -d target -f data.sql
 ```
 
@@ -248,14 +248,14 @@ mode; SQL export always uses `INSERT`.
 
 ---
 
-## `pgproof verify`
+## `smoker verify`
 
 Verifies invariants against an existing dataset. Does not generate.
 
 | Option | Default | Description |
 |---|---|---|
 | `--dsn` | — | DSN or env var name |
-| `--dsn-env` | `PGPROOF_TARGET_DSN` | Env var with the DSN |
+| `--dsn-env` | `SMOKER_TARGET_DSN` | Env var with the DSN |
 | `--schema-file` | — | Build the catalog from a `.sql` dump; the target DSN is still required |
 | `--spec` | — | YAML with application rules |
 | `--out`, `-o` | `proof` | Output directory |
@@ -267,12 +267,12 @@ Verifies invariants against an existing dataset. Does not generate.
 | `--fail-on` | `fail` | `never`, `error` or `fail` |
 
 ```bash
-pgproof verify --spec db/plan.yml --format json,html --fail-on error
+smoker verify --spec db/plan.yml --format json,html --fail-on error
 ```
 
 ---
 
-## `pgproof run`
+## `smoker run`
 
 Introspects, generates, repairs, verifies and writes reports. This is the
 command most teams use.
@@ -292,7 +292,7 @@ It accepts every option from `generate` and `verify`, plus:
 | `--bulk-dir` / `--bulk-local-dir` | — | Server / client directories for `BULK INSERT` |
 
 ```bash
-pgproof run \
+smoker run \
   --rows 5000 \
   --seed 42 \
   --spec db/plan.yml \
@@ -315,9 +315,9 @@ pgproof run \
 ## Reusing artifacts
 
 ```bash
-pgproof introspect -o catalog.json
-pgproof verify --catalog catalog.json
-pgproof run --catalog catalog.json
+smoker introspect -o catalog.json
+smoker verify --catalog catalog.json
+smoker run --catalog catalog.json
 ```
 
 `--catalog` is supported by `verify` and `run`. `plan` currently introspects the

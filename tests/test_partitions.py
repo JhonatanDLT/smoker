@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from datetime import date
 
-from pgproof.adapters.postgres.introspect import parse_partition_bound
-from pgproof.core.generator import Generator
-from pgproof.core.ir import Catalog, Column, Partition, Table
-from pgproof.core.planner import build_plan
+from smoker.adapters.postgres.introspect import parse_partition_bound
+from smoker.core.generator import Generator
+from smoker.core.ir import Catalog, Column, Partition, Table
+from smoker.core.planner import build_plan
 
 
 def test_parse_range_date_bound() -> None:

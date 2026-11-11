@@ -1,13 +1,13 @@
-# pgproof
+# smoker
 
 **Synthetic Postgres data that ships with proof.**
 
-`pgproof` reads your PostgreSQL schema, generates deterministic rows, and then
+`smoker` reads your PostgreSQL schema, generates deterministic rows, and then
 **verifies every invariant it can find** against the generated dataset. The
 output is a report you can hand to a reviewer, a tech lead, or an auditor —
 including an explicit list of what it could **not** verify.
 
-It is not a Faker wrapper. Faker produces plausible values; pgproof produces
+It is not a Faker wrapper. Faker produces plausible values; smoker produces
 rows that satisfy the schema and proves it.
 
 ---
@@ -19,7 +19,7 @@ seeds produce data that looks real but violates foreign keys, checks, derived
 columns, and enum domains. The failure shows up later, as a flaky test or a
 broken demo.
 
-pgproof treats the schema as the specification:
+smoker treats the schema as the specification:
 
 1. **Introspect** — read `pg_catalog` (not a dump).
 2. **Extract** — turn constraints, enums, triggers and checks into invariants.
@@ -34,36 +34,36 @@ pgproof treats the schema as the specification:
 Until the first public release, install from source:
 
 ```bash
-git clone <repo> pgproof
-cd pgproof
+git clone <repo> smoker
+cd smoker
 python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
-.venv/bin/pgproof version
+.venv/bin/smoker version
 ```
 
 Once published:
 
 ```bash
-pipx install pgproof
+pipx install smoker
 # or
-pip install pgproof
+pip install smoker
 ```
 
 Requires Python 3.11+ and PostgreSQL 14–17. SQL Server 2019/2022 support is
-experimental and optional (`pip install "pgproof[sqlserver]"`).
+experimental and optional (`pip install "smoker[sqlserver]"`).
 
 ---
 
 ## Quickstart
 
 ```bash
-createdb pgproof_demo
-psql -d pgproof_demo -f examples/saas-billing/schema.sql
+createdb smoker_demo
+psql -d smoker_demo -f examples/saas-billing/schema.sql
 
-export PGPROOF_SOURCE_DSN=postgresql:///pgproof_demo
-export PGPROOF_TARGET_DSN=postgresql:///pgproof_demo
+export SMOKER_SOURCE_DSN=postgresql:///smoker_demo
+export SMOKER_TARGET_DSN=postgresql:///smoker_demo
 
-pgproof run \
+smoker run \
   --rows 200 \
   --seed 42 \
   --spec examples/saas-billing/plan.yml \
@@ -75,7 +75,7 @@ open proof/report.html
 Expected output:
 
 ```
-pgproof 0.9.9 · 10 tables · 2,000 rows · seed 42
+smoker 0.10.0 · 10 tables · 2,000 rows · seed 42
   generate billing.accounts        200 rows
   generate billing.plans           200 rows
   ...
@@ -88,15 +88,15 @@ RESULT PASS · 63 passed · 0 failed · 0 errors · 2 skipped · 0 violations
 
 | Command | What it does |
 |---|---|
-| `pgproof introspect` | Save the catalog as JSON |
-| `pgproof load-dump` | Build the catalog from a `.sql` dump |
-| `pgproof order` | Show a dependency-safe creation and insertion order |
-| `pgproof audit` | Produce a Markdown schema readiness audit |
-| `pgproof profile` | Sample the source and save a distribution profile |
-| `pgproof plan` | Build a generation plan without touching data |
-| `pgproof generate` | Generate rows into a target database |
-| `pgproof verify` | Verify invariants and write a report |
-| `pgproof run` | Introspect, generate, repair, verify and report |
+| `smoker introspect` | Save the catalog as JSON |
+| `smoker load-dump` | Build the catalog from a `.sql` dump |
+| `smoker order` | Show a dependency-safe creation and insertion order |
+| `smoker audit` | Produce a Markdown schema readiness audit |
+| `smoker profile` | Sample the source and save a distribution profile |
+| `smoker plan` | Build a generation plan without touching data |
+| `smoker generate` | Generate rows into a target database |
+| `smoker verify` | Verify invariants and write a report |
+| `smoker run` | Introspect, generate, repair, verify and report |
 
 Common options:
 
@@ -107,7 +107,7 @@ Common options:
 --table-rows           per-table overrides, e.g. users=5000,plans=5
 --seed                 deterministic seed (default: 42)
 --spec                 YAML file with application-level rules and repairs
---profile              profile JSON from `pgproof profile`
+--profile              profile JSON from `smoker profile`
 --out                  output directory (default: proof)
 --schema               comma-separated schemas to introspect
 --include              comma-separated globs to include
@@ -120,7 +120,7 @@ Common options:
 --dialect              postgres (SQL Server: adapter pending)
 ```
 
-`pgproof` exits `1` when the report verdict is `FAIL`, so it drops straight into
+`smoker` exits `1` when the report verdict is `FAIL`, so it drops straight into
 CI.
 
 ---
@@ -164,17 +164,17 @@ load failed in debug.bad
   detail:     Failing row contains (1, Jorge Flores).
 ```
 
-`pgproof` exits `2` on a load error and `1` on a verification failure.
+`smoker` exits `2` on a load error and `1` on a verification failure.
 
 ## Audit
 
 Before generating anything, get a one-page assessment of the schema:
 
 ```bash
-pgproof audit --dsn-env PGPROOF_SOURCE_DSN --out audit.md
+smoker audit --dsn-env SMOKER_SOURCE_DSN --out audit.md
 ```
 
-It lists the inventory, the invariants pgproof would verify, and risks by
+It lists the inventory, the invariants smoker would verify, and risks by
 severity: missing primary keys, orphan-prone tables, triggers, unparsed checks
 and `NOT VALID` constraints. It reads metadata only.
 
@@ -184,9 +184,9 @@ No live source is required. The dump loader extracts tables, columns,
 constraints, enums, domains, partitions, functions, triggers and views.
 
 ```bash
-pgproof load-dump db/schema.sql -o catalog.json
-pgproof run --schema-file db/schema.sql --target-env PGPROOF_TARGET_DSN --out proof
-pgproof generate --schema-file db/schema.sql --rows 1000 --sql data.sql
+smoker load-dump db/schema.sql -o catalog.json
+smoker run --schema-file db/schema.sql --target-env SMOKER_TARGET_DSN --out proof
+smoker generate --schema-file db/schema.sql --rows 1000 --sql data.sql
 ```
 
 The last command writes the `INSERT` statements without connecting to a
@@ -194,7 +194,7 @@ database; apply them with `psql -f data.sql` after creating the schema.
 
 **The generation space is defined only by the table constraints** (`NOT NULL`,
 types and enums, primary keys, `UNIQUE`, foreign keys, `CHECK` and `EXCLUDE`).
-Relationships come from declared foreign keys. When a dump omits them, pgproof
+Relationships come from declared foreign keys. When a dump omits them, smoker
 infers them from `*_id` naming and from `JOIN`s in views, and marks them as
 `inferred`. `LIKE`, `INHERITS`, `ATTACH PARTITION`, CTEs and dynamic SQL are
 expanded or scanned, and every extracted object carries provenance.
@@ -206,7 +206,7 @@ provenance; they never become table checks and never expand or shrink the
 constraint space. The same applies to view filters, which are aggregate-scope
 candidates.
 
-`pgproof order --schema-file db/schema.sql -o -` lists extensions, enums, types,
+`smoker order --schema-file db/schema.sql -o -` lists extensions, enums, types,
 domains, sequences, tables in foreign-key order, functions, indexes, triggers,
 views, rules and policies, with the dependencies of each step.
 
@@ -215,12 +215,12 @@ views, rules and policies, with the dependencies of each step.
 The dialect layer and a source-first SQL Server adapter are in place:
 
 ```bash
-pip install "pgproof[sqlserver]"
-export PGPROOF_MSSQL_DSN="DRIVER={ODBC Driver 18 for SQL Server};SERVER=...;DATABASE=...;UID=...;PWD=..."
-pgproof introspect --dialect sqlserver --dsn-env PGPROOF_MSSQL_DSN -o catalog.json
-pgproof verify --dialect sqlserver --dsn-env PGPROOF_MSSQL_DSN --out proof
-pgproof verify --dialect azuresql --dsn-env PGPROOF_AZURE_DSN --out proof
-pgproof introspect --dialect sqlserver --databases app,audit --dsn-env PGPROOF_MSSQL_DSN
+pip install "smoker[sqlserver]"
+export SMOKER_MSSQL_DSN="DRIVER={ODBC Driver 18 for SQL Server};SERVER=...;DATABASE=...;UID=...;PWD=..."
+smoker introspect --dialect sqlserver --dsn-env SMOKER_MSSQL_DSN -o catalog.json
+smoker verify --dialect sqlserver --dsn-env SMOKER_MSSQL_DSN --out proof
+smoker verify --dialect azuresql --dsn-env SMOKER_AZURE_DSN --out proof
+smoker introspect --dialect sqlserver --databases app,audit --dsn-env SMOKER_MSSQL_DSN
 ```
 
 Live introspection, verification, generation, repair, T-SQL dump loading,
@@ -229,7 +229,7 @@ multi-database catalogs are implemented and were verified against SQL Server
 2022 Developer in a container. Azure SQL is available through
 `--dialect azuresql` (single database, transient retries) but has not been
 tested against a live Azure instance yet. Temporal history and `BULK INSERT`
-are still pending. Integration tests are gated by `PGPROOF_MSSQL_DSN`.
+are still pending. Integration tests are gated by `SMOKER_MSSQL_DSN`.
 
 ## Repairs
 
@@ -256,20 +256,20 @@ The pipeline becomes **generate → repair → verify**. It runs up to
 after the repair. The report lists every action with before/after counts.
 
 ```bash
-pgproof run --spec examples/saas-billing/plan-repair.yml --out proof
+smoker run --spec examples/saas-billing/plan-repair.yml --out proof
 # repairs: 50 rows across 1 actions in 1 pass(es), residual 0
 ```
 
 ## Distributions
 
-`pgproof profile` samples the source and stores per-column aggregates: null
+`smoker profile` samples the source and stores per-column aggregates: null
 fraction, distinct count, top values and numeric histograms. `--profile` feeds
 them back into the generator, so the synthetic data keeps the source's skew
 without copying a single real row.
 
 ```bash
-pgproof profile --dsn-env PGPROOF_SOURCE_DSN --sample 10000 -o profile.json
-pgproof run --profile profile.json --rows 5000 --out proof
+smoker profile --dsn-env SMOKER_SOURCE_DSN --sample 10000 -o profile.json
+smoker run --profile profile.json --rows 5000 --out proof
 ```
 
 Constraint correctness always wins: a sampled value still passes through the
@@ -358,7 +358,7 @@ python3 -m venv .venv
 Integration tests need a live PostgreSQL:
 
 ```bash
-export PGPROOF_TEST_DSN=postgresql:///pgproof_demo
+export SMOKER_TEST_DSN=postgresql:///smoker_demo
 .venv/bin/pytest -m integration
 ```
 

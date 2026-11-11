@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  pgproof:
+  smoker:
     runs-on: ubuntu-latest
 
     services:
@@ -24,20 +24,20 @@ jobs:
           --health-retries 5
 
     env:
-      PGPROOF_DSN: postgresql://postgres:postgres@localhost:5432/app_test
+      SMOKER_DSN: postgresql://postgres:postgres@localhost:5432/app_test
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Load the schema
-        run: psql "$PGPROOF_DSN" -v ON_ERROR_STOP=1 -f db/schema.sql
+        run: psql "$SMOKER_DSN" -v ON_ERROR_STOP=1 -f db/schema.sql
 
       - name: Generate and verify
-        id: pgproof
+        id: smoker
         uses: ./
         with:
-          source-dsn: ${{ env.PGPROOF_DSN }}
-          target-dsn: ${{ env.PGPROOF_DSN }}
+          source-dsn: ${{ env.SMOKER_DSN }}
+          target-dsn: ${{ env.SMOKER_DSN }}
           allow-same-db: "true"
           rows: "2000"
           spec: db/plan.yml
@@ -45,4 +45,4 @@ jobs:
 
       - name: Print the verdict
         if: always()
-        run: echo "verdict=${{ steps.pgproof.outputs.verdict }} hash=${{ steps.pgproof.outputs.dataset-hash }}"
+        run: echo "verdict=${{ steps.smoker.outputs.verdict }} hash=${{ steps.smoker.outputs.dataset-hash }}"

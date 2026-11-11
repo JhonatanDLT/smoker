@@ -7,14 +7,14 @@ import subprocess
 
 import pytest
 
-from pgproof.adapters.postgres.introspect import connect, introspect
+from smoker.adapters.postgres.introspect import connect, introspect
 
 pytestmark = pytest.mark.integration
 
-DSN = os.environ.get("PGPROOF_TEST_DSN")
+DSN = os.environ.get("SMOKER_TEST_DSN")
 
 
-@pytest.mark.skipif(not DSN, reason="PGPROOF_TEST_DSN is not set")
+@pytest.mark.skipif(not DSN, reason="SMOKER_TEST_DSN is not set")
 def test_trigger_functions_are_deduplicated() -> None:
     assert DSN
     statements = [
@@ -35,7 +35,7 @@ def test_trigger_functions_are_deduplicated() -> None:
             "FOR EACH ROW EXECUTE FUNCTION fn.touch();"
         )
 
-    path = "/tmp/pgproof_functions_test.sql"
+    path = "/tmp/smoker_functions_test.sql"
     with open(path, "w", encoding="utf-8") as handle:
         handle.write("\n".join(statements))
     subprocess.run(

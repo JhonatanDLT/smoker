@@ -23,7 +23,7 @@ The order is deliberate: each phase is funded by the previous one.
 - Better error messages: table, constraint, row, and the SQL that failed.
 - Signed report digest and `--strict` mode. *(Digest delivered; signing pending.)*
 - Four public fixtures: SaaS billing, e-commerce, multi-tenant CRM, analytics.
-- Schema readiness audit (`pgproof audit`).
+- Schema readiness audit (`smoker audit`).
 - `docker run` one-liner. *(pending)*
 
 ## v0.3 — Depth (in progress)
@@ -37,11 +37,11 @@ The order is deliberate: each phase is funded by the previous one.
 - Parallel verification and `TRUNCATE` batching. *(batching delivered in 0.2.1)*
 - More rule shapes: `BETWEEN`, `OR`, `IS NULL` implications, `LIKE` patterns.
   *(partial)*
-- `pgproof explain <invariant>`: why a rule exists and where it came from.
+- `smoker explain <invariant>`: why a rule exists and where it came from.
 
 ## v0.4 — Offline dump (delivered in 0.4.0)
 
-- `pgproof load-dump` for `.sql` files.
+- `smoker load-dump` for `.sql` files.
 - Tables, columns, constraints, enums, domains, partitions, functions,
   triggers, views and simple unique indexes.
 - `LIKE`, `INHERITS`, `ATTACH PARTITION`, CTE joins and dynamic SQL *(0.4.1)*.
@@ -59,7 +59,7 @@ The order is deliberate: each phase is funded by the previous one.
 
 ## v0.6 — Creation order and declared exclusions (delivered in 0.6.0)
 
-- Dependency-safe creation order (`pgproof order`).
+- Dependency-safe creation order (`smoker order`).
 - `creation_order` in `load-dump` and `plan`.
 - Exclusion constraints parsed and verified.
 - View filters classified as aggregate report-only candidates.
@@ -68,7 +68,7 @@ The order is deliberate: each phase is funded by the previous one.
 
 - Only table constraints define the generation space.
 - Trigger/function/view rules become segmentation candidates, report-only.
-- `pgproof generate --sql` writes INSERT statements from a dump with no database.
+- `smoker generate --sql` writes INSERT statements from a dump with no database.
 - `EXCLUDE` constraints bound generation, including range overlaps (0.7.1).
 
 ## v0.8 — Dialect layer (delivered in 0.8.0)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pgproof.core.graph import build_edges, generation_order
-from pgproof.core.ir import Catalog
+from smoker.core.graph import build_edges, generation_order
+from smoker.core.ir import Catalog
 
 
 def test_parent_generates_before_child(catalog: Catalog) -> None:
@@ -23,7 +23,7 @@ def test_detects_two_table_cycle(cyclic_catalog: Catalog) -> None:
 
 
 def test_self_reference_is_not_a_cycle() -> None:
-    from pgproof.core.ir import Column, ForeignKey, Table
+    from smoker.core.ir import Column, ForeignKey, Table
 
     table = Table(
         schema="public",
@@ -50,7 +50,7 @@ def test_self_reference_is_not_a_cycle() -> None:
 
 def test_deep_reverse_chain_does_not_recurse() -> None:
     """A 5,000-table chain in reverse alphabetical order used to hit RecursionError."""
-    from pgproof.core.ir import Column, ForeignKey, Table
+    from smoker.core.ir import Column, ForeignKey, Table
 
     size = 5000
     tables = []

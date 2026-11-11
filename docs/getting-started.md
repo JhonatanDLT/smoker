@@ -11,23 +11,23 @@
 Until the first public release:
 
 ```bash
-git clone <repo> pgproof
-cd pgproof
+git clone <repo> smoker
+cd smoker
 python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
-.venv/bin/pgproof version
+.venv/bin/smoker version
 ```
 
 ## First run in three minutes
 
 ```bash
-createdb pgproof_demo
-psql -d pgproof_demo -f examples/saas-billing/schema.sql
+createdb smoker_demo
+psql -d smoker_demo -f examples/saas-billing/schema.sql
 
-export PGPROOF_SOURCE_DSN=postgresql:///pgproof_demo
-export PGPROOF_TARGET_DSN=postgresql:///pgproof_demo
+export SMOKER_SOURCE_DSN=postgresql:///smoker_demo
+export SMOKER_TARGET_DSN=postgresql:///smoker_demo
 
-.venv/bin/pgproof run \
+.venv/bin/smoker run \
   --rows 200 \
   --seed 42 \
   --spec examples/saas-billing/plan.yml \
@@ -37,7 +37,7 @@ export PGPROOF_TARGET_DSN=postgresql:///pgproof_demo
 Expected output:
 
 ```
-pgproof 0.9.9 · 10 tables · 2,000 rows · seed 42
+smoker 0.10.0 · 10 tables · 2,000 rows · seed 42
   generate billing.accounts        200 rows
   ...
 RESULT PASS · 92 passed · 0 failed · 0 errors · 1 skipped · 0 violations
@@ -56,26 +56,26 @@ Open `proof/report.html`.
 4. **Verify** ran every invariant as a SQL query and counted violations.
 5. **Report** wrote JSON (canonical), HTML (human) and JUnit (CI).
 
-The skipped item is the trigger: pgproof inventories triggers but does not replay
+The skipped item is the trigger: smoker inventories triggers but does not replay
 their side effects. That limitation is printed in the report.
 
 ## From a .sql dump (no live source)
 
-If you only have a schema dump, pgproof can build the catalog without a
+If you only have a schema dump, smoker can build the catalog without a
 database connection:
 
 ```bash
-pgproof load-dump db/schema.sql -o catalog.json
-pgproof run \
+smoker load-dump db/schema.sql -o catalog.json
+smoker run \
   --schema-file db/schema.sql \
-  --target-env PGPROOF_TARGET_DSN \
+  --target-env SMOKER_TARGET_DSN \
   --rows 5000 \
   --out proof
 ```
 
 The loader extracts tables, columns, constraints, enums, domains, partitions,
 functions, triggers and views. Relationships come from declared foreign keys;
-when a dump omits them, pgproof infers them from `*_id` naming and from `JOIN`s
+when a dump omits them, smoker infers them from `*_id` naming and from `JOIN`s
 in views, marking them as `inferred`.
 
 ## Next steps
@@ -83,7 +83,7 @@ in views, marking them as `inferred`.
 ### Audit a schema without generating data
 
 ```bash
-pgproof audit --dsn-env PGPROOF_SOURCE_DSN --out audit.md
+smoker audit --dsn-env SMOKER_SOURCE_DSN --out audit.md
 ```
 
 Useful before a pilot or a migration. It reads metadata only.
@@ -91,14 +91,14 @@ Useful before a pilot or a migration. It reads metadata only.
 ### Reproduce the source's skew
 
 ```bash
-pgproof profile --dsn-env PGPROOF_SOURCE_DSN --sample 10000 -o profile.json
-pgproof run --profile profile.json --rows 5000 --out proof
+smoker profile --dsn-env SMOKER_SOURCE_DSN --sample 10000 -o profile.json
+smoker run --profile profile.json --rows 5000 --out proof
 ```
 
 ### Repair a cross-table rule
 
 ```bash
-pgproof run --spec examples/saas-billing/plan-repair.yml --out proof
+smoker run --spec examples/saas-billing/plan-repair.yml --out proof
 ```
 
 The pipeline becomes generate → repair → verify. The report lists every repair.

@@ -7,19 +7,19 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from pgproof.adapters.postgres.dialect import PostgresDialect
-from pgproof.adapters.postgres.introspect import connect, introspect
-from pgproof.adapters.postgres.query_runner import PostgresQueryRunner
-from pgproof.adapters.postgres.sql_executor import PostgresSqlExecutor
-from pgproof.adapters.postgres.writer import PostgresRowWriter
-from pgproof.adapters.spec.yaml_loader import YamlSpecLoader
-from pgproof.application.generate import GenerateDataset
-from pgproof.application.repair import RepairDataset
-from pgproof.application.verify import VerifyDataset, VerifyRequest
-from pgproof.core.errors import RepairError
-from pgproof.core.invariants import Invariant, InvariantKind
+from smoker.adapters.postgres.dialect import PostgresDialect
+from smoker.adapters.postgres.introspect import connect, introspect
+from smoker.adapters.postgres.query_runner import PostgresQueryRunner
+from smoker.adapters.postgres.sql_executor import PostgresSqlExecutor
+from smoker.adapters.postgres.writer import PostgresRowWriter
+from smoker.adapters.spec.yaml_loader import YamlSpecLoader
+from smoker.application.generate import GenerateDataset
+from smoker.application.repair import RepairDataset
+from smoker.application.verify import VerifyDataset, VerifyRequest
+from smoker.core.errors import RepairError
+from smoker.core.invariants import Invariant, InvariantKind
 
-DSN = os.environ.get("PGPROOF_TEST_DSN")
+DSN = os.environ.get("SMOKER_TEST_DSN")
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -122,7 +122,7 @@ def test_repair_error_rolls_back() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(not DSN, reason="PGPROOF_TEST_DSN is not set")
+@pytest.mark.skipif(not DSN, reason="SMOKER_TEST_DSN is not set")
 def test_cross_table_repair_reaches_zero() -> None:
     assert DSN
     subprocess.run(

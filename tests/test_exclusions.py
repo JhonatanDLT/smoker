@@ -6,15 +6,15 @@ import subprocess
 import psycopg
 import pytest
 
-from pgproof.adapters.postgres.dialect import PostgresDialect
-from pgproof.adapters.postgres.dump import DumpLoader
-from pgproof.adapters.postgres.introspect import connect, introspect
-from pgproof.adapters.postgres.query_runner import PostgresQueryRunner
-from pgproof.adapters.postgres.writer import PostgresRowWriter
-from pgproof.adapters.spec.yaml_loader import YamlSpecLoader
-from pgproof.application.generate import GenerateDataset
-from pgproof.application.verify import VerifyDataset, VerifyRequest
-from pgproof.core.exclusions import (
+from smoker.adapters.postgres.dialect import PostgresDialect
+from smoker.adapters.postgres.dump import DumpLoader
+from smoker.adapters.postgres.introspect import connect, introspect
+from smoker.adapters.postgres.query_runner import PostgresQueryRunner
+from smoker.adapters.postgres.writer import PostgresRowWriter
+from smoker.adapters.spec.yaml_loader import YamlSpecLoader
+from smoker.application.generate import GenerateDataset
+from smoker.application.verify import VerifyDataset, VerifyRequest
+from smoker.core.exclusions import (
     build_exclusion_specs,
     next_value,
     parse_exclusion_definition,
@@ -22,18 +22,18 @@ from pgproof.core.exclusions import (
     predicate_matches,
     ranges_overlap,
 )
-from pgproof.core.filters import filter_catalog
-from pgproof.core.generator import GenerationError, Generator
-from pgproof.core.ir import (
+from smoker.core.filters import filter_catalog
+from smoker.core.generator import GenerationError, Generator
+from smoker.core.ir import (
     Column,
     ExclusionConstraint,
     ExclusionElement,
     Table,
     UniqueConstraint,
 )
-from pgproof.core.planner import build_plan
+from smoker.core.planner import build_plan
 
-DSN = os.environ.get("PGPROOF_TEST_DSN")
+DSN = os.environ.get("SMOKER_TEST_DSN")
 
 
 def test_parse_exclusion_definition() -> None:
@@ -175,10 +175,10 @@ def test_unsupported_exclusion_operator_fails_loudly() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(not DSN, reason="PGPROOF_TEST_DSN is not set")
+@pytest.mark.skipif(not DSN, reason="SMOKER_TEST_DSN is not set")
 def test_exclusion_constraints_accept_generated_rows() -> None:
     assert DSN
-    schema = "pgproof_excl_test"
+    schema = "smoker_excl_test"
     dump = f"""
     DROP SCHEMA IF EXISTS {schema} CASCADE;
     CREATE SCHEMA {schema};
@@ -231,10 +231,10 @@ def test_exclusion_constraints_accept_generated_rows() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(not DSN, reason="PGPROOF_TEST_DSN is not set")
+@pytest.mark.skipif(not DSN, reason="SMOKER_TEST_DSN is not set")
 def test_live_introspection_reads_exclusion_constraints() -> None:
     assert DSN
-    schema = "pgproof_excl_live"
+    schema = "smoker_excl_live"
     subprocess.run(
         [
             "psql",

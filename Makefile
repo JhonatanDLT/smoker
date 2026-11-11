@@ -8,7 +8,7 @@ test:
 	.venv/bin/pytest
 
 test-integration:
-	PGPROOF_TEST_DSN=$${PGPROOF_TEST_DSN:-postgresql:///pgproof_demo} .venv/bin/pytest -m integration
+	SMOKER_TEST_DSN=$${SMOKER_TEST_DSN:-postgresql:///smoker_demo} .venv/bin/pytest -m integration
 
 demo:
 	./scripts/demo.sh

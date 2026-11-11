@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from pgproof.core.generator import Generator
-from pgproof.core.ir import Catalog, CheckConstraint, Column, Table
-from pgproof.core.planner import build_plan
+from smoker.core.generator import Generator
+from smoker.core.ir import Catalog, CheckConstraint, Column, Table
+from smoker.core.planner import build_plan
 
 
 def rows_of(catalog: Catalog, key: str, rows: int = 20, seed: int = 7) -> list[tuple]:
@@ -73,9 +73,9 @@ def test_derived_columns_and_orderings() -> None:
 
 
 def test_filtered_unique_index_is_scoped_to_its_predicate() -> None:
-    from pgproof.adapters.sqlserver.dump import SqlServerDumpLoader
-    from pgproof.core.generator import Generator
-    from pgproof.core.planner import build_plan
+    from smoker.adapters.sqlserver.dump import SqlServerDumpLoader
+    from smoker.core.generator import Generator
+    from smoker.core.planner import build_plan
 
     catalog = SqlServerDumpLoader().load(
         """

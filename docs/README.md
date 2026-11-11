@@ -1,6 +1,6 @@
 # Documentation
 
-Everything about pgproof, from the first command to the business model.
+Everything about smoker, from the first command to the business model.
 
 ## Start here
 

@@ -1,4 +1,4 @@
-"""Core data model for pgproof.
+"""Core data model for smoker.
 
 Everything in this package is pure: no database drivers, no I/O, no CLI.
 Adapters translate a dialect into this model; the engine never looks back.

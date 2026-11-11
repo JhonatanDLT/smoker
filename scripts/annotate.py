@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Turn a pgproof report into GitHub annotations and a job summary.
+"""Turn a smoker report into GitHub annotations and a job summary.
 
 GitHub does not display JUnit XML natively. This script emits workflow commands
 (``::error`` / ``::warning`` / ``::notice``) and appends a Markdown summary to
@@ -57,7 +57,7 @@ def summary_markdown(report: dict[str, Any], policy: str) -> str:
     verdict = report.get("verdict", "FAIL")
     icon = "✅" if verdict == "PASS" else "❌"
     lines = [
-        f"## {icon} pgproof: {verdict}",
+        f"## {icon} smoker: {verdict}",
         "",
         (
             f"Policy: `{policy}` · seed `{report.get('seed')}` · "
@@ -120,7 +120,7 @@ def summary_markdown(report: dict[str, Any], policy: str) -> str:
             "### Reproduce",
             "",
             "```bash",
-            report.get("reproduce", "pgproof run ..."),
+            report.get("reproduce", "smoker run ..."),
             "```",
             "",
             f"Dataset hash: `{report.get('dataset_hash', '')}`",
