@@ -153,13 +153,26 @@ tables does not exhaust `max_locks_per_transaction`.
 ### Row construction
 
 1. Assign primary-key values from the pool.
-2. Assign foreign keys from parent pools.
-3. Generate the remaining columns from SQL type and semantic name.
-4. Apply derived rules (`amount = quantity * unit_price`).
-5. Apply ordering rules (`ends_at > starts_at`).
-6. Enforce composite unique keys.
-7. Validate against local rules; retry with fresh values.
-8. Index the row for scope-aware foreign keys.
+2. Assign one-to-one foreign keys (a unique constraint made only of FK
+   columns) from the parent pool by row index, so each parent is used once.
+3. Assign the remaining foreign keys from parent pools.
+4. Generate the remaining columns from SQL type and semantic name.
+5. Apply derived rules (`amount = quantity * unit_price`).
+6. Apply ordering rules (`ends_at > starts_at`).
+7. Enforce composite unique keys.
+8. Validate against local rules; retry with fresh values.
+9. Index the row for scope-aware foreign keys.
+
+Composite keys that contain an FK column (`(parent_id, sequence)`) rewrite the
+pre-allocated key with the parent pool's identifier. Without this, the key is
+unique but references a parent row that does not exist.
+
+When a partial unique index collides and its key is an immutable column (a
+foreign key, for example one active subscription per account), the generator
+changes a predicate column so the row leaves the index instead of writing a
+duplicate. SQL Server `IN` checks are normalized by the engine to
+`col = 'a' OR col = 'b'`; the rule parser recognizes that form and constrains
+generated values to the listed set.
 
 ### Scope-aware foreign keys
 

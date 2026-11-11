@@ -167,7 +167,7 @@ def build_exclusion_specs(table: Table) -> list[ExclusionSpec]:
 
 def _normalize_expression(text: str) -> str:
     text = re.sub(r"\[([^\]]+)\]", r"\1", text)
-    text = re.sub(r"::[A-Za-z_][A-Za-z0-9_ ]*", "", text)
+    text = re.sub(r"::[A-Za-z_][A-Za-z0-9_. ]*", "", text)
     return _strip_outer_parens(text)
 
 
@@ -538,6 +538,8 @@ def next_value(
         return Decimal(str(current or 0)) + step
     if kind == DataKind.FLOAT:
         return float(current or 0) + float(step)
+    if kind == DataKind.BOOLEAN:
+        return not bool(current)
     if kind == DataKind.DATE:
         return (current or _BASE_DATE) + timedelta(days=step)
     if kind in (DataKind.TIMESTAMP, DataKind.TIMESTAMPTZ):

@@ -486,11 +486,9 @@ def _temporal(
             for object_id, start, end in cursor.fetchall()
         }
     for object_id, table in by_id.items():
-        if table is None:
+        if table is None or object_id not in history:
             continue
-        history_schema, history_name = history.get(
-            object_id, (table.schema, f"{table.name}_history")
-        )
+        history_schema, history_name = history[object_id]
         start, end = periods.get(object_id, (None, None))
         table.temporal = TemporalInfo(
             history_table=(

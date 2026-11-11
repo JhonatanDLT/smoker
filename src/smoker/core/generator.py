@@ -229,37 +229,103 @@ class Generator:
         return self._rngs[key]
 
     # ---------------------------------------------------------------- pools
+    def _key_sets(self, table: Table) -> list[tuple[str, ...]]:
+        key_sets: list[tuple[str, ...]] = []
+        if table.primary_key:
+            key_sets.append(tuple(table.primary_key))
+        for unique in table.uniques:
+            key_sets.append(tuple(unique.columns))
+        return key_sets
+
     def _build_pools(self) -> None:
+        base_keys: set[tuple[str, tuple[str, ...]]] = set()
         for table in self.catalog.tables:
             rows = self.plan.tables[table.key].rows
-            key_sets: list[tuple[str, ...]] = []
-            if table.primary_key:
-                key_sets.append(tuple(table.primary_key))
-            for unique in table.uniques:
-                key_sets.append(tuple(unique.columns))
-            for columns in key_sets:
+            for columns in self._key_sets(table):
                 rng = self.rng_for(f"{table.key}:pool")
                 values = [
-                    tuple(self._key_value(table.column(name), table, index, rng) for name in columns)
+                    tuple(
+                        self._key_value(table.column(name), table, index, rng)
+                        for name in columns
+                    )
                     for index in range(rows)
                 ]
                 self.pools[(table.key, columns)] = values
+                base_keys.add((table.key, columns))
 
         # Foreign keys may list parent columns in a different order than the
-        # primary key, and may point at a unique key. Add reordered aliases.
+        # primary key. Build aliases before resolving keys so composite keys
+        # that contain an FK column can read the parent pool.
+        self._add_fk_aliases(base_keys)
+        self._resolve_fk_key_pools()
+        for key in list(self.pools):
+            if key not in base_keys:
+                del self.pools[key]
+        self._add_fk_aliases(base_keys)
+
+    def _add_fk_aliases(
+        self, base_keys: set[tuple[str, tuple[str, ...]]]
+    ) -> None:
         for table in self.catalog.tables:
             for fk in table.foreign_keys:
                 target = (fk.parent_key, tuple(fk.parent_columns))
                 if target in self.pools:
                     continue
                 for (parent_key, columns), values in list(self.pools.items()):
-                    if parent_key != fk.parent_key or set(columns) != set(fk.parent_columns):
+                    if (parent_key, columns) not in base_keys:
+                        continue
+                    if parent_key != fk.parent_key or set(columns) != set(
+                        fk.parent_columns
+                    ):
                         continue
                     positions = [columns.index(name) for name in fk.parent_columns]
                     self.pools[target] = [
-                        tuple(value[position] for position in positions) for value in values
+                        tuple(value[position] for position in positions)
+                        for value in values
                     ]
                     break
+
+    def _resolve_fk_key_pools(self) -> None:
+        """Align composite keys that contain a foreign-key column.
+
+        A pre-allocated key such as ``(parent_id, sequence)`` must reuse the
+        parent's identifier, not an identifier derived from the child table.
+        Without this, the key pool is internally consistent but points at rows
+        that do not exist.
+        """
+        for _ in range(len(self.catalog.tables) + 1):
+            changed = False
+            for table in self.catalog.tables:
+                for columns in self._key_sets(table):
+                    pool = self.pools.get((table.key, columns))
+                    if not pool:
+                        continue
+                    sources: list[tuple[int, int, list[tuple[Any, ...]]]] = []
+                    for position, name in enumerate(columns):
+                        for fk in table.foreign_keys:
+                            if name not in fk.child_columns:
+                                continue
+                            index = fk.child_columns.index(name)
+                            parent = self.pools.get(
+                                (fk.parent_key, tuple(fk.parent_columns))
+                            )
+                            if parent:
+                                sources.append((position, index, parent))
+                            break
+                    if not sources:
+                        continue
+                    for row_index, values in enumerate(pool):
+                        mutable = list(values)
+                        for position, parent_index, parent in sources:
+                            mutable[position] = parent[row_index % len(parent)][
+                                parent_index
+                            ]
+                        candidate = tuple(mutable)
+                        if candidate != values:
+                            pool[row_index] = candidate
+                            changed = True
+            if not changed:
+                break
 
     def _key_value(self, column: Column, table: Table, index: int, rng: random.Random) -> Any:
         kind = column.data_kind
@@ -295,6 +361,8 @@ class Generator:
                 if name in partition_values:
                     continue
                 values[name] = value
+
+        self._assign_unique_foreign_keys(table, values, index)
 
         nullable = {column.name: column.nullable for column in table.columns}
         ordered_fks = sorted(
@@ -333,6 +401,48 @@ class Generator:
         self._apply_derived(table, values)
         self._fix_orderings(table, values)
         return tuple(values.get(column.name) for column in columns)
+
+    def _assign_unique_foreign_keys(
+        self, table: Table, values: dict[str, Any], index: int
+    ) -> None:
+        """Fill one-to-one relationships without retrying.
+
+        A unique constraint made only of FK columns means each parent may be
+        referenced once. Assign parents by row index so the set is exact and
+        no duplicate is ever produced.
+        """
+        for unique in table.uniques:
+            if unique.predicate:
+                continue
+            columns = set(unique.columns)
+            match = next(
+                (
+                    fk
+                    for fk in table.foreign_keys
+                    if set(fk.child_columns) == columns
+                ),
+                None,
+            )
+            if match is None:
+                continue
+            pool = self.pools.get(
+                (match.parent_key, tuple(match.parent_columns))
+            )
+            if not pool:
+                continue
+            if index >= len(pool):
+                raise GenerationError(
+                    f"{table.key}: unique foreign key {unique.name} needs one "
+                    f"parent row per child row, but {match.parent_key} only has "
+                    f"{len(pool)} rows"
+                )
+            parent_values = pool[index]
+            for child, parent in zip(
+                match.child_columns, match.parent_columns
+            ):
+                if child in columns:
+                    position = match.parent_columns.index(parent)
+                    values[child] = parent_values[position]
 
     def _apply_derived(self, table: Table, values: dict[str, Any]) -> None:
         for target, left, operator, right in self.rules[table.key].derived:
@@ -1064,6 +1174,39 @@ class Generator:
             {name: values.get(name) for name in columns}
         )
 
+    def _leave_predicate(
+        self,
+        table: Table,
+        values: dict[str, Any],
+        predicate: str,
+        index: int,
+    ) -> bool:
+        """Move a colliding row out of a partial unique index.
+
+        When the key is an immutable foreign key (or otherwise unavailable),
+        changing a predicate column is enough: the row stops matching the
+        index, so it cannot collide. Only regenerable columns are considered.
+        """
+        blocked = set(all_partition_columns(table))
+        for name in predicate_columns(predicate):
+            column = table.column(name)
+            if (
+                name in blocked
+                or column.generated
+                or column.identity
+                or any(name in fk.child_columns for fk in table.foreign_keys)
+            ):
+                continue
+            current = values.get(name)
+            for attempt in range(12):
+                candidate = next_value(column, current, index, attempt, self.plan.seed)
+                if candidate is None:
+                    break
+                values[name] = candidate
+                if not predicate_matches(predicate, values):
+                    return True
+        return False
+
     def _enforce_unique_keys(
         self, table: Table, row: tuple[Any, ...], index: int
     ) -> tuple[Any, ...]:
@@ -1098,7 +1241,11 @@ class Generator:
             candidates = [
                 name
                 for name in key_columns
-                if isinstance(values.get(name), str) and name not in blocked
+                if name not in blocked
+                and table.column(name).data_kind in {DataKind.TEXT, DataKind.ENUM}
+                and not any(
+                    name in fk.child_columns for fk in table.foreign_keys
+                )
             ]
             if not candidates:
                 candidates = [
@@ -1109,13 +1256,17 @@ class Generator:
                     and not table.column(name).generated
                 ]
             if not candidates:
+                if predicate and self._leave_predicate(
+                    table, values, predicate, index
+                ):
+                    continue
                 continue
 
             target = candidates[0]
             column = table.column(target)
             counter = 0
             while True:
-                if isinstance(values.get(target), str):
+                if column.data_kind == DataKind.TEXT:
                     base = str(values.get(target) or "")
                     limit = column.max_length or 64
                     suffix = (

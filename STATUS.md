@@ -128,13 +128,17 @@ implemented but not yet tested against a live Azure instance.
   dump loader, profiler and range partitions are implemented and registered as
   `--dialect sqlserver`; integration tests run against SQL Server 2022
   Developer.
-- **170 tests passing** with both `SMOKER_TEST_DSN` and `SMOKER_MSSQL_DSN`:
+- **175 tests passing** with both `SMOKER_TEST_DSN` and `SMOKER_MSSQL_DSN`:
   PostgreSQL 16 plus SQL Server 2022 Developer in a container.
 - SQL Server integration covers source introspection, verification, generation,
-  identity/computed/rowversion, `varbinary`/`uniqueidentifier`/`datetime2`,
-  stored procedures, range partitions, filtering unique indexes, multi-database
-  catalogs, temporal history, `BULK INSERT`, profiling and dump → server →
-  generate → verify.
+  identity/computed/rowversion, `varbinary`/`uniqueidentifier`/`datetime2` and
+  `datetimeoffset`, stored procedures, range partitions, filtering unique
+  indexes, multi-database catalogs, temporal history, `BULK INSERT`, profiling
+  and dump → server → generate → verify.
+- `examples/realistic/` ships six domain schemas for PostgreSQL and SQL Server
+  (billing, e-commerce, fintech, logistics, CRM, healthcare). All twelve
+  dialect/domain combinations generate and verify at 500 rows with
+  `scripts/run_realistic.sh`.
 - Same seed produces the same dataset hash every run.
 
 ## Documentation

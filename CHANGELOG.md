@@ -4,6 +4,38 @@ All notable changes to smoker. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [Unreleased]
+
+### Added
+
+- **Realistic schema pack** in `examples/realistic/`: six domains for
+  PostgreSQL and SQL Server (billing, e-commerce, fintech, logistics,
+  multi-tenant CRM and healthcare), plus `scripts/run_realistic.sh`.
+  All twelve combinations generate and verify at 500 rows.
+- One-to-one relationships: a unique constraint made only of foreign-key
+  columns now assigns each parent row once instead of retrying and colliding.
+- Composite keys that contain a foreign-key column now reuse the parent's
+  identifier, so the pre-allocated key is valid for both the key and the FK.
+
+### Fixed
+
+- Partial unique indexes whose key is an immutable FK now move the row out of
+  the predicate instead of failing with a duplicate.
+- PostgreSQL enum predicates with a schema-qualified cast
+  (`status = 'active'::billing.subscription_status`) are evaluated correctly.
+- SQL Server `IN` checks normalized to `col = 'a' OR col = 'b'` are parsed as
+  allowed values, so generated data respects them.
+- Bracketed arithmetic checks no longer produce a spurious copy rule that
+  overwrote the computed column.
+- SQL Server temporal introspection only marks system-versioned tables; plain
+  tables no longer receive a fake history table.
+- SQL Server digests and profiling support `datetimeoffset` columns on pyodbc
+  versions that reject ODBC type `-155`.
+
+### Measured
+
+- 175 tests; all pass with PostgreSQL 16 and SQL Server 2022 Developer.
+
 ## [0.10.0] — 2026-11-11
 
 ### Changed

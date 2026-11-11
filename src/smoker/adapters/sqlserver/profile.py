@@ -35,6 +35,18 @@ BUCKET_KINDS = {
 }
 
 
+def _select_list(table: Any) -> str:
+    dialect = SqlServerDialect()
+    expressions = []
+    for column in table.columns:
+        name = dialect.quote_ident(column.name)
+        if column.sql_type.lower().startswith("datetimeoffset"):
+            expressions.append(f"CONVERT(nvarchar(50), {name}, 127) AS {name}")
+        else:
+            expressions.append(name)
+    return ", ".join(expressions)
+
+
 def _sample_rows(
     cursor: Any,
     qualified: str,
@@ -47,14 +59,17 @@ def _sample_rows(
     chosen = method
     if chosen == "auto":
         chosen = "limit" if total <= LIMIT_THRESHOLD else "tablesample"
+    select_list = _select_list(table)
     if chosen == "limit" or total <= sample:
-        cursor.execute(f"SELECT TOP ({int(sample)}) * FROM {qualified}")
+        cursor.execute(
+            f"SELECT TOP ({int(sample)}) {select_list} FROM {qualified}"
+        )
         return cursor.fetchall(), "limit", None
 
     pct = max(0.01, min(100.0, 100.0 * sample / max(total, 1)))
     for _ in range(3):
         cursor.execute(
-            f"SELECT TOP ({int(sample)}) * FROM {qualified} "
+            f"SELECT TOP ({int(sample)}) {select_list} FROM {qualified} "
             f"TABLESAMPLE SYSTEM ({pct:.4f} PERCENT) REPEATABLE ({int(seed)})"
         )
         rows = cursor.fetchall()
@@ -63,7 +78,7 @@ def _sample_rows(
         pct = min(100.0, pct * 4)
         if pct >= 100.0:
             break
-    cursor.execute(f"SELECT TOP ({int(sample)}) * FROM {qualified}")
+    cursor.execute(f"SELECT TOP ({int(sample)}) {select_list} FROM {qualified}")
     return cursor.fetchall(), "limit", None
 
 
@@ -119,9 +134,10 @@ def profile_table(
 
         column = table.column(name)
         kind = bucket_kind(column.data_kind)
+        offset = column.sql_type.lower().startswith("datetimeoffset")
         bucket_values = (
             buckets(non_null, kind)
-            if column.data_kind in BUCKET_KINDS
+            if column.data_kind in BUCKET_KINDS and not offset
             else []
         )
         result.columns[name] = ColumnStats(

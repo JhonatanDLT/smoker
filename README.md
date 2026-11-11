@@ -146,6 +146,20 @@ Three public schemas exercise different features:
 | `examples/analytics` | JSONB, bounded decimals, timestamp ordering |
 | `examples/partitioned-events` | Range, list, hash, multi-column and sub-partitioned routing |
 
+For realistic end-to-end testing, `examples/realistic/` contains six domain
+schemas (billing, e-commerce, fintech, logistics, CRM and healthcare) for both
+PostgreSQL and SQL Server, with temporal tables, filtered/partial unique
+indexes, `EXCLUDE` ranges, partitions, audit triggers, views and procedures:
+
+```bash
+./scripts/run_realistic.sh          # ROWS=500 by default
+ROWS=5000 ./scripts/run_realistic.sh
+```
+
+Reports land in `proof/realistic/<domain>/<dialect>/`. See
+[`examples/realistic/README.md`](examples/realistic/README.md) for the matrix
+and prerequisites.
+
 ```bash
 make fixtures   # creates one database per fixture and writes proof/<fixture>/
 ```

@@ -164,6 +164,20 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
 - Partitioned tables are checked per generated row, but `ctid`-based
   verification still needs manual review across partitions.
 
+## Realistic fixture limits
+
+- One-to-one foreign keys (a unique constraint made only of FK columns) require
+  at least as many parent rows as child rows. If the child has more rows,
+  generation fails with a clear message instead of producing duplicates.
+- Scope-aware tenant assignment is best-effort. If a tenant has no row in a
+  referenced dimension, the generator adopts the parent's scope to keep the FK
+  valid; this can leave a sibling FK in a different tenant.
+- SQL Server checks foreign keys per row for some access paths, so forward
+  self-references are avoided in the SQL Server fixtures. PostgreSQL `COPY`
+  checks at the end of the statement and supports them.
+- `--schema <domain>` should be used with the realistic fixtures so audit
+  tables are written only by triggers, not by synthetic generation.
+
 ## SQL Server limits (experimental)
 
 - Live introspection, verification, generation, repair, T-SQL dump loading,

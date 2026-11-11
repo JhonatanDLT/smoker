@@ -94,7 +94,7 @@ class SqlServerQueryRunner:
                 if not columns:
                     continue
                 column_list = ", ".join(
-                    self.dialect.quote_ident(name) for name in columns
+                    self._digest_column(table.column(name)) for name in columns
                 )
                 order_columns = table.primary_key or columns
                 order_list = ", ".join(
@@ -111,6 +111,14 @@ class SqlServerQueryRunner:
                         )
                     )
         return hasher.hexdigest()
+
+    def _digest_column(self, column: Any) -> str:
+        name = self.dialect.quote_ident(column.name)
+        if column.sql_type.lower().startswith("datetimeoffset"):
+            # pyodbc cannot fetch ODBC type -155 directly on every driver
+            # version; a stable textual representation keeps the digest usable.
+            return f"CONVERT(nvarchar(50), {name}, 127) AS {name}"
+        return name
 
 
 __all__ = ["SqlServerQueryRunner"]

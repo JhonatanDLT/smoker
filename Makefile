@@ -13,6 +13,9 @@ test-integration:
 demo:
 	./scripts/demo.sh
 
+realistic:
+	./scripts/run_realistic.sh
+
 fixtures:
 	./scripts/run_fixtures.sh
 

@@ -177,6 +177,77 @@ def extract_predicate(definition: str) -> str | None:
     return None
 
 
+def _split_top_level(text: str, separator: str) -> list[str]:
+    parts: list[str] = []
+    depth = 0
+    in_string = False
+    start = 0
+    index = 0
+    width = len(separator)
+    while index < len(text):
+        char = text[index]
+        if char == "'":
+            if in_string and index + 1 < len(text) and text[index + 1] == "'":
+                index += 2
+                continue
+            in_string = not in_string
+        elif not in_string:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            elif depth == 0 and text[index : index + width].upper() == separator:
+                parts.append(text[start:index])
+                index += width
+                start = index
+                continue
+        index += 1
+    parts.append(text[start:])
+    return parts
+
+
+def _strip_outer_parens(text: str) -> str:
+    text = text.strip()
+    while text.startswith("(") and text.endswith(")"):
+        depth = 0
+        balanced = True
+        for index, char in enumerate(text):
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0 and index != len(text) - 1:
+                    balanced = False
+                    break
+        if not balanced or depth != 0:
+            break
+        text = text[1:-1].strip()
+    return text
+
+
+def _or_equality_allowed(predicate: str) -> tuple[str | None, set[str]]:
+    """Recognize ``col = 'a' OR col = 'b'`` chains (SQL Server form)."""
+    parts = _split_top_level(_strip_outer_parens(predicate), " OR ")
+    column: str | None = None
+    values: set[str] = set()
+    for part in parts:
+        part = _strip_outer_parens(part)
+        match = re.fullmatch(
+            r"\[?([A-Za-z_][A-Za-z0-9_]*)\]?\s*=\s*'((?:[^']|'')*)'"
+            r"(?:::[A-Za-z0-9_.]+)?",
+            part,
+        )
+        if not match:
+            return None, set()
+        name, value = match.group(1), match.group(2).replace("''", "'")
+        if column is None:
+            column = name
+        elif column != name:
+            return None, set()
+        values.add(value)
+    return column, values
+
+
 def parse_local_rules(table: Table) -> LocalRules:
     rules = LocalRules()
     for check in table.checks:
@@ -185,6 +256,11 @@ def parse_local_rules(table: Table) -> LocalRules:
             rules.unparsed.append(check.name)
             continue
         matched = False
+        known_columns = {column.name for column in table.columns}
+        or_column, or_values = _or_equality_allowed(predicate)
+        if or_column in known_columns and or_values:
+            rules.allowed.setdefault(or_column, set()).update(or_values)
+            matched = True
         for column, operator, raw_value in _RANGE_RE.findall(predicate):
             value = float(raw_value)
             if operator == ">":
@@ -211,7 +287,6 @@ def parse_local_rules(table: Table) -> LocalRules:
         for column, limit in _LEN_RE.findall(predicate):
             rules.maxlen[column] = min(rules.maxlen.get(column, int(limit)), int(limit))
             matched = True
-        known_columns = {column.name for column in table.columns}
         cast = r"(?:::[\w]+(?:\s+[\w]+)?)?"
         for target, left, operator, right in re.findall(
             rf"\[?([A-Za-z_][A-Za-z0-9_]*)\]?\s*=\s*\(*\s*"
@@ -224,7 +299,7 @@ def parse_local_rules(table: Table) -> LocalRules:
                 matched = True
         for target, source in re.findall(
             r"\[?([A-Za-z_][A-Za-z0-9_]*)\]?\s*=\s*"
-            r"\[?([A-Za-z_][A-Za-z0-9_]*)\]?\b(?!\s*[+\-*/])",
+            r"\[?([A-Za-z_][A-Za-z0-9_]*)\]?(?!\]?\s*[+\-*/])",
             predicate,
         ):
             if target in known_columns and source in known_columns and target != source:

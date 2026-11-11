@@ -80,3 +80,45 @@ def test_catalog_invariants_cover_constraints(catalog: Catalog) -> None:
     assert "enum" in kinds
     foreign_key = next(i for i in invariants if i.kind.value == "foreign_key")
     assert "NOT EXISTS" in foreign_key.violation_sql
+
+
+def test_bracketed_arithmetic_is_not_duplicated_as_copy() -> None:
+    table = Table(
+        schema="dbo",
+        name="invoice_lines",
+        columns=[
+            Column("quantity", "int", nullable=False),
+            Column("unit_price", "decimal(12,2)", nullable=False),
+            Column("amount", "decimal(12,2)", nullable=False),
+        ],
+        checks=[
+            CheckConstraint(
+                "amount_check",
+                "CHECK ([amount]=[quantity]*[unit_price])",
+                None,
+            )
+        ],
+    )
+    rules = parse_local_rules(table)
+
+    assert rules.derived == [("amount", "quantity", "*", "unit_price")]
+
+
+def test_or_equality_chain_becomes_allowed_values() -> None:
+    table = Table(
+        schema="dbo",
+        name="accounts",
+        columns=[Column("status", "nvarchar(20)", nullable=False)],
+        checks=[
+            CheckConstraint(
+                "status_check",
+                "CHECK ([status]='cancelled' OR [status]='past_due' OR "
+                "[status]='active' OR [status]='trial')",
+                None,
+            )
+        ],
+    )
+    rules = parse_local_rules(table)
+
+    assert rules.allowed["status"] == {"cancelled", "past_due", "active", "trial"}
+    assert rules.unparsed == []

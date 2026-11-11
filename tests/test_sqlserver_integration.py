@@ -158,6 +158,7 @@ def _create_rich_schema(connection) -> None:
                     CONSTRAINT rich_orders_active DEFAULT 1,
                 created_at datetime2(3) NOT NULL
                     CONSTRAINT rich_orders_created DEFAULT SYSUTCDATETIME(),
+                offset_at datetimeoffset(7) NULL,
                 payload varbinary(max) NULL,
                 doubled AS (total * 2) PERSISTED,
                 version rowversion,
@@ -599,6 +600,11 @@ def test_sqlserver_temporal_history_population() -> None:
                 WITH (SYSTEM_VERSIONING = ON (
                     HISTORY_TABLE = smoker_temporal.accounts_history
                 ));
+                IF OBJECT_ID('smoker_temporal.plain_notes','U') IS NOT NULL
+                    DROP TABLE smoker_temporal.plain_notes;
+                CREATE TABLE smoker_temporal.plain_notes (
+                    id int NOT NULL CONSTRAINT plain_notes_pk PRIMARY KEY
+                );
                 """
             )
         connection.commit()
@@ -611,6 +617,7 @@ def test_sqlserver_temporal_history_population() -> None:
     table = catalog.table("smoker_temporal.accounts")
     assert table.temporal is not None
     assert table.temporal.history_table == "smoker_temporal.accounts_history"
+    assert catalog.table("smoker_temporal.plain_notes").temporal is None
     assert table.column("valid_from").generated == "system"
     assert table.column("valid_to").generated == "system"
 
