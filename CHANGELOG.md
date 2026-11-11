@@ -4,6 +4,24 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [0.9.7] — 2026-11-11
+
+### Added
+
+- **Temporal invariants** for SQL Server system-versioned tables.
+  - History periods must be ordered, never inverted and never overlap
+    (window function over the history table).
+  - Current rows must not overlap their own history.
+  - New `temporal` invariant kind, included in JSON/HTML/JUnit reports.
+  - Zero-length history periods are allowed: SQL Server records them when a
+    row changes more than once in one transaction.
+- Integration test that corrupts history with versioning disabled and proves
+  both temporal invariants fail.
+
+### Measured
+
+- 164 tests; all pass with PostgreSQL 16 and SQL Server 2022 Developer.
+
 ## [0.9.6] — 2026-11-11
 
 ### Added
@@ -26,7 +44,7 @@ versioning.
 
 ### Measured
 
-- 162 tests; all pass with PostgreSQL 16 and SQL Server 2022 Developer.
+- 164 tests; all pass with PostgreSQL 16 and SQL Server 2022 Developer.
 
 ## [0.9.5] — 2026-11-11
 

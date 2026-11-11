@@ -625,6 +625,9 @@ def test_sqlserver_temporal_history_population() -> None:
     assert updated == 5
     assert history >= 5
     assert report.verdict == "PASS"
+    temporal = [item for item in report.results if item.kind == "temporal"]
+    assert len(temporal) == 2
+    assert all(item.status == "pass" for item in temporal)
 
 
 def test_sqlserver_bulk_insert(tmp_path) -> None:
@@ -690,3 +693,104 @@ def test_sqlserver_bulk_insert(tmp_path) -> None:
 
     assert report.verdict == "PASS"
     assert any(Path(local_dir).glob("*.tsv"))
+
+
+def test_sqlserver_temporal_overlap_is_detected() -> None:
+    assert MSSQL_DSN
+    schema = "pgproof_temporal_overlap"
+    connection = connect(MSSQL_DSN)
+    try:
+        with _cursor(connection) as cursor:
+            cursor.execute(
+                f"""
+                SET QUOTED_IDENTIFIER ON;
+                IF SCHEMA_ID('{schema}') IS NULL
+                    EXEC('CREATE SCHEMA {schema}');
+                IF OBJECT_ID('{schema}.accounts','U') IS NOT NULL
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM sys.tables
+                        WHERE object_id = OBJECT_ID('{schema}.accounts')
+                          AND temporal_type = 2
+                    )
+                        ALTER TABLE {schema}.accounts
+                            SET (SYSTEM_VERSIONING = OFF);
+                    IF OBJECT_ID('{schema}.accounts_history','U') IS NOT NULL
+                        DROP TABLE {schema}.accounts_history;
+                    DROP TABLE {schema}.accounts;
+                END;
+                CREATE TABLE {schema}.accounts (
+                    id int NOT NULL CONSTRAINT overlap_accounts_pk PRIMARY KEY,
+                    name nvarchar(80) NOT NULL,
+                    balance decimal(12,2) NOT NULL,
+                    valid_from datetime2 GENERATED ALWAYS AS ROW START HIDDEN NOT NULL,
+                    valid_to datetime2 GENERATED ALWAYS AS ROW END HIDDEN NOT NULL,
+                    PERIOD FOR SYSTEM_TIME (valid_from, valid_to)
+                )
+                WITH (SYSTEM_VERSIONING = ON (
+                    HISTORY_TABLE = {schema}.accounts_history
+                ));
+                INSERT INTO {schema}.accounts (id, name, balance)
+                    VALUES (1, N'one', 10);
+                UPDATE {schema}.accounts SET balance = balance + 1 WHERE id = 1;
+                """
+            )
+        connection.commit()
+        catalog = filter_catalog(introspect(connection), schemas=[schema])
+        baseline = VerifyDataset(
+            catalog,
+            SqlServerQueryRunner(connection),
+            YamlSpecLoader(),
+            SqlServerDialect(),
+            seed=5,
+        ).execute(VerifyRequest())
+        assert baseline.verdict == "PASS"
+        assert any(item.kind == "temporal" for item in baseline.results)
+
+        with _cursor(connection) as cursor:
+            cursor.execute(
+                f"ALTER TABLE {schema}.accounts SET (SYSTEM_VERSIONING = OFF);"
+            )
+            cursor.execute(
+                f"INSERT INTO {schema}.accounts_history "
+                "(id, name, balance, valid_from, valid_to) "
+                "VALUES (1, N'fake', 1, '20250101', '99991231');"
+            )
+        connection.commit()
+
+        corrupted = VerifyDataset(
+            catalog,
+            SqlServerQueryRunner(connection),
+            YamlSpecLoader(),
+            SqlServerDialect(),
+            seed=5,
+        ).execute(VerifyRequest())
+    finally:
+        with _cursor(connection) as cursor:
+            cursor.execute(
+                f"""
+                IF OBJECT_ID('{schema}.accounts','U') IS NOT NULL
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM sys.tables
+                        WHERE object_id = OBJECT_ID('{schema}.accounts')
+                          AND temporal_type = 2
+                    )
+                        ALTER TABLE {schema}.accounts
+                            SET (SYSTEM_VERSIONING = OFF);
+                    IF OBJECT_ID('{schema}.accounts_history','U') IS NOT NULL
+                        DROP TABLE {schema}.accounts_history;
+                    DROP TABLE {schema}.accounts;
+                END;
+                """
+            )
+        connection.commit()
+        connection.close()
+
+    assert corrupted.verdict == "FAIL"
+    failed = [
+        item
+        for item in corrupted.results
+        if item.kind == "temporal" and item.status == "fail"
+    ]
+    assert len(failed) == 2

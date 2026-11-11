@@ -24,6 +24,7 @@ class InvariantKind(str, Enum):
     ENUM = "enum"
     APP_RULE = "app_rule"
     EXCLUSION = "exclusion"
+    TEMPORAL = "temporal"
     TRIGGER = "trigger"
 
 
@@ -404,6 +405,39 @@ def invariants_from_catalog(catalog: Catalog, dialect: SqlDialect) -> list[Invar
                     ),
                 )
             )
+
+        if table.temporal is not None:
+            info = table.temporal
+            columns = [
+                name
+                for name in (info.start_column, info.end_column)
+                if name is not None
+            ]
+            for suffix, description, violation_sql in (
+                (
+                    "periods",
+                    f"{table.key} history periods are ordered and never overlap",
+                    dialect.temporal_history_sql(table),
+                ),
+                (
+                    "current",
+                    f"{table.key} current rows never overlap their history",
+                    dialect.temporal_current_sql(table),
+                ),
+            ):
+                if not violation_sql:
+                    continue
+                invariants.append(
+                    Invariant(
+                        id=_invariant_id(f"temporal_{suffix}", table, suffix),
+                        kind=InvariantKind.TEMPORAL,
+                        table=table.key,
+                        columns=columns,
+                        description=description,
+                        violation_sql=violation_sql,
+                        note=f"history table {info.history_table}",
+                    )
+                )
 
         for trigger in table.triggers:
             invariants.append(

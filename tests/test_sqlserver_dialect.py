@@ -208,3 +208,41 @@ def test_temporal_info_round_trip() -> None:
     restored = Catalog.from_dict(catalog.to_dict())
 
     assert restored.table("dbo.accounts").temporal == table.temporal
+
+
+def test_temporal_invariants_use_history_table() -> None:
+    from pgproof.core.invariants import InvariantKind, invariants_from_catalog
+    from pgproof.core.ir import TemporalInfo
+
+    table = Table(
+        schema="dbo",
+        name="accounts",
+        columns=[
+            Column("id", "int", nullable=False),
+            Column("name", "nvarchar(80)", nullable=False),
+            Column("valid_from", "datetime2", nullable=False, generated="system"),
+            Column("valid_to", "datetime2", nullable=False, generated="system"),
+        ],
+        primary_key=["id"],
+        temporal=TemporalInfo(
+            history_table="dbo.accounts_history",
+            start_column="valid_from",
+            end_column="valid_to",
+        ),
+    )
+    catalog = Catalog(database="db", server_version="16", tables=[table])
+
+    temporal = [
+        invariant
+        for invariant in invariants_from_catalog(catalog, SqlServerDialect())
+        if invariant.kind == InvariantKind.TEMPORAL
+    ]
+
+    assert len(temporal) == 2
+    assert {invariant.columns[0] for invariant in temporal} == {"valid_from"}
+    history = next(i for i in temporal if "history periods" in i.description)
+    current = next(i for i in temporal if "current rows" in i.description)
+    assert "[dbo].[accounts_history]" in history.violation_sql
+    assert "LAG" in history.violation_sql
+    assert "[dbo].[accounts]" in current.violation_sql
+    assert "EXISTS" in current.violation_sql

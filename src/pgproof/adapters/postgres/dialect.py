@@ -123,6 +123,12 @@ class PostgresDialect:
             f"WHERE ({predicate}) IS FALSE"
         )
 
+    def temporal_history_sql(self, table: Table) -> str | None:
+        return None
+
+    def temporal_current_sql(self, table: Table) -> str | None:
+        return None
+
     def exclusion_sql(
         self, table: Table, exclusion: ExclusionConstraint
     ) -> str | None:

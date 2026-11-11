@@ -168,8 +168,12 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
   generator samples inside the boundary range; SQL Server routes the rows.
 - Temporal tables: system-period columns are marked non-writable. With
   `--temporal-history`, pgproof updates one safe column per temporal table so
-  SQL Server writes one history version per current row. The history periods
-  are not yet verified as invariants.
+  SQL Server writes one history version per current row. Temporal invariants
+  check that history periods are ordered and never overlap, and that current
+  rows never overlap their own history. Zero-length periods are valid because
+  SQL Server records them when a row changes twice in one transaction. Gaps
+  between versions are legitimate (for example, delete then re-insert) and are
+  not flagged.
 - Filtered unique indexes are modeled as `UniqueConstraint.predicate`; the generator enforces them only inside the predicate and the verifier uses the filtered scope.
 - `TRUNCATE` with foreign keys falls back to FK-ordered `DELETE`.
 - `IDENTITY` values are inserted with `SET IDENTITY_INSERT`; sequences are
@@ -186,7 +190,8 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
   directory visible to the SQL Server service (`--bulk-dir`) and optionally a
   client directory mapped to it (`--bulk-local-dir`). Azure SQL rejects it.
 - Temporal history is generated through updates, not by replaying a full
-  version chain. Period overlap/coverage verification is still pending.
+  version chain. Coverage (every change has exactly one version) is not
+  verified; only period ordering and non-overlap are.
 
 ## Dialect limits
 

@@ -520,13 +520,22 @@ table and executes a deterministic `UPDATE`, so SQL Server writes history rows.
 Temporal tables use `DELETE` during truncation because `TRUNCATE` is not
 supported on system-versioned tables.
 
+Temporal invariants are rendered by the dialect (`temporal_history_sql`,
+`temporal_current_sql`) and reported with kind `temporal`:
+
+- history rows are ordered by `valid_from` and consecutive periods must not
+  overlap (`LAG(valid_to) > valid_from`); inverted periods are violations,
+  zero-length periods are allowed;
+- a current row must not overlap any history row with the same primary key.
+
 ### BULK INSERT
 
 `SqlServerBulkWriter` writes a TSV to `--bulk-local-dir` and runs `BULK INSERT`
 from `--bulk-dir` (a path visible to the SQL Server service). It uses
-`TABLOCK`, `CHECK_CONSTRAINTS`, `KEEPIDENTITY` and `FIRE_TRIGGERS`, and falls
-back to `fast_executemany` for Azure SQL. The file must be shared between client
-and server; in Docker this is a named volume or bind mount.
+`TABLOCK`, `CHECK_CONSTRAINTS`, `KEEPIDENTITY` and `FIRE_TRIGGERS`. Azure SQL
+does not support local-file `BULK INSERT` (`bulk_insert_from_file=False`) and
+keeps the batched writer. The file must be shared between client and server; in
+Docker this is a named volume or bind mount.
 
 ### Multi-database SQL Server
 

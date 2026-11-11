@@ -183,6 +183,67 @@ class SqlServerDialect:
     ) -> str | None:
         return None
 
+    def _history_table(self, table: Table) -> str | None:
+        info = table.temporal
+        if info is None or not info.history_table:
+            return None
+        parts = info.history_table.split(".")
+        if len(parts) >= 3:
+            database, schema, name = parts[-3], parts[-2], parts[-1]
+        elif len(parts) == 2:
+            database, schema, name = None, parts[0], parts[1]
+        else:
+            database, schema, name = table.database, table.schema, parts[0]
+        return self.quote_table_parts(database, schema, name)
+
+    def _period_columns(self, table: Table) -> tuple[str, str] | None:
+        info = table.temporal
+        if info is None or not info.start_column or not info.end_column:
+            return None
+        return (
+            self.quote_ident(info.start_column),
+            self.quote_ident(info.end_column),
+        )
+
+    def temporal_history_sql(self, table: Table) -> str | None:
+        history = self._history_table(table)
+        period = self._period_columns(table)
+        if history is None or period is None:
+            return None
+        start, end = period
+        keys = ", ".join(self.quote_ident(name) for name in table.primary_key)
+        partition = keys or "1"
+        select_keys = f"{keys}, " if keys else ""
+        return (
+            "SELECT 1 AS violation FROM ("
+            f"SELECT {select_keys}{start} AS period_start, {end} AS period_end, "
+            f"LAG({end}) OVER (PARTITION BY {partition} ORDER BY {start}) "
+            "AS previous_end "
+            f"FROM {history}) AS temporal_history "
+            "WHERE period_start > period_end "
+            "OR previous_end > period_start"
+        )
+
+    def temporal_current_sql(self, table: Table) -> str | None:
+        history = self._history_table(table)
+        period = self._period_columns(table)
+        if history is None or period is None:
+            return None
+        current = self.quote_table(table)
+        start, end = period
+        if table.primary_key:
+            join = " AND ".join(
+                f"h.{self.quote_ident(name)} = c.{self.quote_ident(name)}"
+                for name in table.primary_key
+            )
+        else:
+            join = "1 = 1"
+        return (
+            f"SELECT 1 AS violation FROM {current} c "
+            f"WHERE EXISTS (SELECT 1 FROM {history} h WHERE {join} "
+            f"AND c.{start} < h.{end} AND h.{start} < c.{end})"
+        )
+
     # ------------------------------------------------------ query wrapping
     def count_sql(self, sql: str) -> str:
         return f"SELECT COUNT_BIG(*) FROM ({sql}) AS violations"
