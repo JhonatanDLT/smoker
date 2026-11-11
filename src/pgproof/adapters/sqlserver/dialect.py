@@ -214,7 +214,8 @@ class SqlServerDialect:
             for table in tables
             for fk in table.foreign_keys
         )
-        if not has_edges:
+        has_temporal = any(table.temporal is not None for table in tables)
+        if not has_edges and not has_temporal:
             return [
                 f"TRUNCATE TABLE {self.quote_table(table)};"
                 for table in tables

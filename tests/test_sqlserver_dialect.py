@@ -178,3 +178,33 @@ def test_sql_script_writer_uses_tsql(tmp_path: Path) -> None:
     assert 'INSERT INTO [dbo].[accounts] ([id], [email], [parent_id], [name]) VALUES' in text
     assert "N'a@example.com'" in text
     assert "COMMIT TRANSACTION;" in text
+
+
+def test_bulk_text_serialization() -> None:
+    from pgproof.adapters.sqlserver.bulk import _field
+
+    assert _field(None) == ""
+    assert _field(True) == "1"
+    assert _field("a\tb\nc") == "a b c"
+    assert _field(b"pg") == "0x7067"
+
+
+def test_temporal_info_round_trip() -> None:
+    from pgproof.core.ir import TemporalInfo
+
+    table = Table(
+        schema="dbo",
+        name="accounts",
+        columns=[Column("id", "int", nullable=False)],
+        primary_key=["id"],
+        temporal=TemporalInfo(
+            history_table="dbo.accounts_history",
+            start_column="valid_from",
+            end_column="valid_to",
+        ),
+    )
+    catalog = Catalog(database="db", server_version="16", tables=[table])
+
+    restored = Catalog.from_dict(catalog.to_dict())
+
+    assert restored.table("dbo.accounts").temporal == table.temporal

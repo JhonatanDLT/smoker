@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
+from typing import Any
 
 from ..core.repair import RepairResult
 from ..core.report import Report
@@ -29,12 +31,20 @@ class RunPipeline:
         self.verify = verify
         self.repair = repair
 
-    def execute(self, request: VerifyRequest) -> PipelineResult:
+    def execute(
+        self,
+        request: VerifyRequest,
+        decorate: Callable[[Any], None] | None = None,
+    ) -> PipelineResult:
         invariants = self.verify.invariants_for(request.spec_path)
         generated = self.generate.execute()
+        if decorate is not None:
+            decorate(self.verify.catalog)
         repairs = self.repair.execute(invariants)
         dataset_hash = (
-            self.verify.dataset_digest() if repairs.applied else generated.dataset_hash
+            self.verify.dataset_digest()
+            if repairs.applied or decorate is not None
+            else generated.dataset_hash
         )
         report = self.verify.execute(
             replace(

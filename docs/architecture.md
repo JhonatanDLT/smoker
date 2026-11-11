@@ -511,6 +511,23 @@ pgproof verify --dialect sqlserver --dsn-env PGPROOF_MSSQL_DSN
 `row_identity="pk"`, `bulk_method="batch"`, `filtered_indexes=True`,
 `temporal_tables=True`, `cross_database=True`.
 
+### Temporal history
+
+`sys.tables.temporal_type`, `history_table_id` and `sys.periods` populate
+`Table.temporal` (`TemporalInfo`). `--temporal-history` runs
+`populate_temporal_history`: it picks one constraint-safe column per temporal
+table and executes a deterministic `UPDATE`, so SQL Server writes history rows.
+Temporal tables use `DELETE` during truncation because `TRUNCATE` is not
+supported on system-versioned tables.
+
+### BULK INSERT
+
+`SqlServerBulkWriter` writes a TSV to `--bulk-local-dir` and runs `BULK INSERT`
+from `--bulk-dir` (a path visible to the SQL Server service). It uses
+`TABLOCK`, `CHECK_CONSTRAINTS`, `KEEPIDENTITY` and `FIRE_TRIGGERS`, and falls
+back to `fast_executemany` for Azure SQL. The file must be shared between client
+and server; in Docker this is a named volume or bind mount.
+
 ### Multi-database SQL Server
 
 On-prem SQL Server can hold several databases. `--databases app,audit` (or

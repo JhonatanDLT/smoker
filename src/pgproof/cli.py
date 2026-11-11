@@ -22,6 +22,8 @@ from .adapters.report import FileReportWriter, HtmlRenderer, JsonRenderer, JUnit
 from .adapters.report.audit_markdown import AuditMarkdownRenderer
 from .adapters.script import SqlFileWriter
 from .adapters.spec.yaml_loader import SpecError, YamlSpecLoader
+from .adapters.sqlserver.bulk import SqlServerBulkWriter
+from .adapters.sqlserver.temporal import populate_temporal_history
 from .application.audit import AuditSchema
 from .application.generate import GenerateDataset
 from .application.policy import FailPolicy, should_fail
@@ -535,7 +537,13 @@ def generate_cmd(
     seed: int = typer.Option(42, "--seed"),
     table_rows: str | None = typer.Option(None, "--table-rows"),
     truncate_first: bool = typer.Option(True, "--truncate/--no-truncate"),
-    method: str = typer.Option("copy", "--method", help="copy or insert"),
+    method: str = typer.Option("copy", "--method", help="copy, insert or bulk"),
+    bulk_dir: str | None = typer.Option(
+        None, "--bulk-dir", help="Server-visible directory for BULK INSERT"
+    ),
+    bulk_local_dir: str | None = typer.Option(
+        None, "--bulk-local-dir", help="Client directory mapped to --bulk-dir"
+    ),
     catalog_path: Path | None = typer.Option(None, "--catalog"),
     profile_path: Path | None = typer.Option(None, "--profile", help="Profile JSON"),
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
@@ -552,11 +560,22 @@ def generate_cmd(
         "--sql",
         help="Write INSERT statements to this .sql file instead of a target database",
     ),
+    temporal_history: bool = typer.Option(
+        False,
+        "--temporal-history",
+        help="After loading, update temporal tables to create history rows",
+    ),
     dialect: str = typer.Option(
         "postgres", "--dialect", help="Dialect: postgres, sqlserver or azuresql"
     ),
 ) -> None:
     """Generate rows into the target database, or into a .sql file."""
+    if temporal_history and sql_out is not None:
+        _fail("--temporal-history requires a database target, not --sql")
+        return
+    if temporal_history and dialect not in {"sqlserver", "azuresql"}:
+        _fail("--temporal-history is only implemented for SQL Server")
+        return
     source_dsn = _dsn(source, source_env) if schema_file is None and catalog_path is None else None
     target_dsn = None
     if sql_out is None:
@@ -574,7 +593,29 @@ def generate_cmd(
         writer = SqlFileWriter(sql_out, adapter.dialect, truncate=truncate_first)
     else:
         assert target_dsn is not None
-        writer = adapter.writer(_connect(adapter, target_dsn))
+        bulk = method in {"bulk", "bulk_insert"}
+        if bulk and dialect != "sqlserver":
+            _fail("--method bulk is only implemented for on-prem SQL Server")
+            return
+        if bulk and not bulk_dir:
+            _fail("--method bulk requires --bulk-dir")
+            return
+        connection = _connect(adapter, target_dsn)
+        if bulk:
+            assert bulk_dir is not None
+            try:
+                writer = SqlServerBulkWriter(
+                    connection,
+                    adapter.dialect,
+                    local_dir=bulk_local_dir or bulk_dir,
+                    server_dir=bulk_dir,
+                )
+            except ValueError as exc:
+                connection.close()
+                _fail(str(exc))
+                return
+        else:
+            writer = adapter.writer(connection)
     use_case = GenerateDataset(
         catalog,
         writer,
@@ -586,8 +627,17 @@ def generate_cmd(
         progress=_progress,
         profile=_load_profile(profile_path),
     )
+    history_rows = 0
     try:
         result = use_case.execute()
+        if temporal_history:
+            connection = getattr(writer, "connection", None)
+            if connection is None:
+                _fail("--temporal-history requires a SQL Server connection")
+                return
+            history_rows = populate_temporal_history(
+                connection, catalog, adapter.dialect
+            )
     except LoadError as exc:
         _fail(exc.format())
         return
@@ -600,6 +650,8 @@ def generate_cmd(
     for warning in result.plan.warnings:
         typer.echo(f"warn: {warning}", err=True)
     total = sum(result.counts.values())
+    if history_rows:
+        typer.echo(f"temporal history rows: {history_rows:,}")
     if sql_out is not None:
         typer.echo(f"generated {total:,} rows with seed {seed} → {sql_out}")
     else:
@@ -682,7 +734,18 @@ def run_cmd(
     spec: Path | None = typer.Option(None, "--spec", help="YAML file with app-level rules"),
     out: Path = typer.Option(Path("proof"), "--out", "-o"),
     truncate_first: bool = typer.Option(True, "--truncate/--no-truncate"),
-    method: str = typer.Option("copy", "--method", help="copy or insert"),
+    method: str = typer.Option("copy", "--method", help="copy, insert or bulk"),
+    bulk_dir: str | None = typer.Option(
+        None, "--bulk-dir", help="Server-visible directory for BULK INSERT"
+    ),
+    bulk_local_dir: str | None = typer.Option(
+        None, "--bulk-local-dir", help="Client directory mapped to --bulk-dir"
+    ),
+    temporal_history: bool = typer.Option(
+        False,
+        "--temporal-history",
+        help="After loading, update temporal tables to create history rows",
+    ),
     sample: int = typer.Option(5, "--sample"),
     catalog_path: Path | None = typer.Option(None, "--catalog"),
     format: str = typer.Option(
@@ -707,6 +770,9 @@ def run_cmd(
     """Introspect, generate, verify and write a report."""
     adapter = _adapter(dialect)
     started = time.perf_counter()
+    if temporal_history and dialect not in {"sqlserver", "azuresql"}:
+        _fail("--temporal-history is only implemented for SQL Server")
+        return
     source_dsn = _dsn(source, source_env) if schema_file is None and catalog_path is None else None
     target_dsn = _dsn(target, target_env)
     if source_dsn is not None and source_dsn == target_dsn:
@@ -721,8 +787,29 @@ def run_cmd(
         json.dumps(catalog.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
+    bulk = method in {"bulk", "bulk_insert"}
+    if bulk and dialect != "sqlserver":
+        _fail("--method bulk is only implemented for on-prem SQL Server")
+        return
+    if bulk and not bulk_dir:
+        _fail("--method bulk requires --bulk-dir")
+        return
     connection = _connect(adapter, target_dsn)
-    writer = adapter.writer(connection)
+    if bulk:
+        assert bulk_dir is not None
+        try:
+            writer = SqlServerBulkWriter(
+                connection,
+                adapter.dialect,
+                local_dir=bulk_local_dir or bulk_dir,
+                server_dir=bulk_dir,
+            )
+        except ValueError as exc:
+            connection.close()
+            _fail(str(exc))
+            return
+    else:
+        writer = adapter.writer(connection)
     generate = GenerateDataset(
         catalog,
         writer,
@@ -747,13 +834,21 @@ def run_cmd(
         max_passes=max_passes,
     )
 
+    history_rows = {"count": 0}
+
+    def decorate_temporal(temporal_catalog):
+        history_rows["count"] = populate_temporal_history(
+            connection, temporal_catalog, adapter.dialect
+        )
+
     try:
         result = RunPipeline(generate, verify, repair).execute(
             VerifyRequest(
                 spec_path=str(spec) if spec else None,
                 sample=sample,
                 command=_command_line(),
-            )
+            ),
+            decorate=decorate_temporal if temporal_history else None,
         )
     except LoadError as exc:
         _fail(exc.format())
@@ -785,6 +880,8 @@ def run_cmd(
     )
     for warning in result.generated.plan.warnings:
         typer.echo(f"warn: {warning}", err=True)
+    if history_rows["count"]:
+        typer.echo(f"temporal history rows: {history_rows['count']:,}")
 
     paths = _report_writer(format).write(result.report, str(out))
     if result.repairs.actions:

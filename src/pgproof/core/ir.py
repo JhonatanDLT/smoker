@@ -285,6 +285,13 @@ class Partition:
 
 
 @dataclass
+class TemporalInfo:
+    history_table: str | None = None
+    start_column: str | None = None
+    end_column: str | None = None
+
+
+@dataclass
 class Table:
     schema: str
     name: str
@@ -304,6 +311,7 @@ class Table:
     partitions: list[Partition] = field(default_factory=list)
     provenance: Provenance | None = None
     database: str | None = None
+    temporal: TemporalInfo | None = None
 
     @property
     def key(self) -> str:
@@ -439,6 +447,15 @@ class Catalog:
                     partitions=partitions,
                     provenance=_provenance(raw.get("provenance")),
                     database=raw.get("database"),
+                    temporal=(
+                        TemporalInfo(
+                            history_table=raw["temporal"].get("history_table"),
+                            start_column=raw["temporal"].get("start_column"),
+                            end_column=raw["temporal"].get("end_column"),
+                        )
+                        if raw.get("temporal")
+                        else None
+                    ),
                 )
             )
             _restore_partition_values(tables[-1])

@@ -26,6 +26,7 @@ from ...core.ir import (
     RuleCandidate,
     SqlObject,
     Table,
+    TemporalInfo,
     Trigger,
     UniqueConstraint,
 )
@@ -442,6 +443,66 @@ def _partition_value(value: Any, column: Any) -> Any:
     return text
 
 
+def _temporal(
+    conn: Any, tables: dict[str, Table], database: str | None = None
+) -> None:
+    by_object = {(table.schema, table.name): table for table in tables.values()}
+    with _cursor(conn) as cursor:
+        cursor.execute(
+            "SELECT object_id, schema_name, table_name FROM ("
+            "SELECT t.object_id, s.name AS schema_name, t.name AS table_name "
+            "FROM sys.tables t JOIN sys.schemas s ON s.schema_id = t.schema_id"
+            ") q"
+        )
+        by_id = {
+            int(object_id): by_object.get((str(schema), str(name)))
+            for object_id, schema, name in cursor.fetchall()
+        }
+        cursor.execute(
+            """
+            SELECT t.object_id, hs.name AS history_schema, ht.name AS history_table
+            FROM sys.tables t
+            JOIN sys.tables ht ON ht.object_id = t.history_table_id
+            JOIN sys.schemas hs ON hs.schema_id = ht.schema_id
+            WHERE t.temporal_type = 2
+            """
+        )
+        history = {
+            int(object_id): (str(schema), str(name))
+            for object_id, schema, name in cursor.fetchall()
+        }
+        cursor.execute(
+            """
+            SELECT p.object_id, sc.name AS start_column, ec.name AS end_column
+            FROM sys.periods p
+            JOIN sys.columns sc
+              ON sc.object_id = p.object_id AND sc.column_id = p.start_column_id
+            JOIN sys.columns ec
+              ON ec.object_id = p.object_id AND ec.column_id = p.end_column_id
+            """
+        )
+        periods = {
+            int(object_id): (str(start), str(end))
+            for object_id, start, end in cursor.fetchall()
+        }
+    for object_id, table in by_id.items():
+        if table is None:
+            continue
+        history_schema, history_name = history.get(
+            object_id, (table.schema, f"{table.name}_history")
+        )
+        start, end = periods.get(object_id, (None, None))
+        table.temporal = TemporalInfo(
+            history_table=(
+                f"{database}.{history_schema}.{history_name}"
+                if database
+                else f"{history_schema}.{history_name}"
+            ),
+            start_column=start,
+            end_column=end,
+        )
+
+
 def _triggers(conn: Any, tables: dict[str, Table]) -> None:
     by_object = {f"{table.schema}.{table.name}": table for table in tables.values()}
     with _cursor(conn) as cursor:
@@ -827,6 +888,7 @@ def introspect(
             db_tables = _tables(conn, active, database=database)
             _constraints(conn, db_tables)
             _partitions(conn, db_tables)
+            _temporal(conn, db_tables, database=database)
             _triggers(conn, db_tables)
             db_functions, db_objects = _objects(
                 conn, db_tables, database=database

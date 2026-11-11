@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -544,3 +545,148 @@ def test_azure_dialect_single_database_mode() -> None:
             raise AssertionError("Azure SQL accepted multiple databases")
     finally:
         connection.close()
+
+
+def test_sqlserver_temporal_history_population() -> None:
+    assert MSSQL_DSN
+    connection = connect(MSSQL_DSN)
+    try:
+        with _cursor(connection) as cursor:
+            cursor.execute(
+                """
+                SET QUOTED_IDENTIFIER ON;
+                IF SCHEMA_ID('pgproof_temporal') IS NULL
+                    EXEC('CREATE SCHEMA pgproof_temporal');
+                IF OBJECT_ID('pgproof_temporal.accounts','U') IS NOT NULL
+                BEGIN
+                    ALTER TABLE pgproof_temporal.accounts
+                        SET (SYSTEM_VERSIONING = OFF);
+                    IF OBJECT_ID('pgproof_temporal.accounts_history','U') IS NOT NULL
+                        DROP TABLE pgproof_temporal.accounts_history;
+                    DROP TABLE pgproof_temporal.accounts;
+                END;
+                CREATE TABLE pgproof_temporal.accounts (
+                    id int IDENTITY(1,1) NOT NULL
+                        CONSTRAINT temporal_accounts_pk PRIMARY KEY,
+                    name nvarchar(80) NOT NULL,
+                    balance decimal(12,2) NOT NULL
+                        CONSTRAINT temporal_balance CHECK (balance >= 0),
+                    valid_from datetime2 GENERATED ALWAYS AS ROW START HIDDEN NOT NULL,
+                    valid_to datetime2 GENERATED ALWAYS AS ROW END HIDDEN NOT NULL,
+                    PERIOD FOR SYSTEM_TIME (valid_from, valid_to)
+                )
+                WITH (SYSTEM_VERSIONING = ON (
+                    HISTORY_TABLE = pgproof_temporal.accounts_history
+                ));
+                """
+            )
+        connection.commit()
+        catalog = filter_catalog(
+            introspect(connection), schemas=["pgproof_temporal"]
+        )
+    finally:
+        connection.close()
+
+    table = catalog.table("pgproof_temporal.accounts")
+    assert table.temporal is not None
+    assert table.temporal.history_table == "pgproof_temporal.accounts_history"
+    assert table.column("valid_from").generated == "system"
+    assert table.column("valid_to").generated == "system"
+
+    from pgproof.adapters.sqlserver.temporal import populate_temporal_history
+
+    connection = connect(MSSQL_DSN)
+    writer = SqlServerRowWriter(connection)
+    try:
+        generated = GenerateDataset(catalog, writer, rows=5, seed=7).execute()
+    finally:
+        writer.close()
+
+    connection = connect(MSSQL_DSN)
+    try:
+        updated = populate_temporal_history(connection, catalog)
+        with _cursor(connection) as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) FROM pgproof_temporal.accounts_history"
+            )
+            history = int(cursor.fetchone()[0])
+        report = VerifyDataset(
+            catalog,
+            SqlServerQueryRunner(connection),
+            YamlSpecLoader(),
+            SqlServerDialect(),
+            seed=7,
+        ).execute(
+            VerifyRequest(dataset_hash=generated.dataset_hash, plan=generated.plan)
+        )
+    finally:
+        connection.close()
+
+    assert updated == 5
+    assert history >= 5
+    assert report.verdict == "PASS"
+
+
+def test_sqlserver_bulk_insert(tmp_path) -> None:
+    local_dir = os.environ.get("PGPROOF_MSSQL_BULK_LOCAL")
+    server_dir = os.environ.get("PGPROOF_MSSQL_BULK_SERVER")
+    if not MSSQL_DSN or not local_dir or not server_dir:
+        pytest.skip("BULK INSERT staging directories are not configured")
+
+    connection = connect(MSSQL_DSN)
+    try:
+        with _cursor(connection) as cursor:
+            cursor.execute(
+                """
+                SET QUOTED_IDENTIFIER ON;
+                IF SCHEMA_ID('pgproof_bulk') IS NULL
+                    EXEC('CREATE SCHEMA pgproof_bulk');
+                IF OBJECT_ID('pgproof_bulk.users','U') IS NOT NULL
+                    DROP TABLE pgproof_bulk.users;
+                CREATE TABLE pgproof_bulk.users (
+                    id int IDENTITY(1,1) NOT NULL
+                        CONSTRAINT bulk_pk PRIMARY KEY,
+                    name nvarchar(80) NOT NULL,
+                    amount decimal(12,2) NOT NULL
+                        CONSTRAINT bulk_amount CHECK (amount >= 0),
+                    active bit NOT NULL
+                );
+                """
+            )
+        connection.commit()
+        catalog = filter_catalog(introspect(connection), schemas=["pgproof_bulk"])
+    finally:
+        connection.close()
+
+    from pgproof.adapters.sqlserver.bulk import SqlServerBulkWriter
+
+    connection = connect(MSSQL_DSN)
+    writer = SqlServerBulkWriter(
+        connection,
+        SqlServerDialect(),
+        local_dir=local_dir,
+        server_dir=server_dir,
+    )
+    try:
+        generated = GenerateDataset(
+            catalog, writer, rows=20, seed=3, method="bulk"
+        ).execute()
+    finally:
+        writer.close()
+
+    verify_connection = connect(MSSQL_DSN)
+    try:
+        report = VerifyDataset(
+            catalog,
+            SqlServerQueryRunner(verify_connection),
+            YamlSpecLoader(),
+            SqlServerDialect(),
+            seed=3,
+        ).execute(
+            VerifyRequest(dataset_hash=generated.dataset_hash, plan=generated.plan)
+        )
+    finally:
+        verify_connection.close()
+
+    assert report.verdict == "PASS"
+    assert any(Path(local_dir).glob("*.tsv"))

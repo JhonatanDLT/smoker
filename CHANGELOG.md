@@ -4,6 +4,30 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [0.9.6] — 2026-11-11
+
+### Added
+
+- **Temporal history generation** for SQL Server system-versioned tables.
+  - Introspection reads `temporal_type`, `history_table_id` and `sys.periods`.
+  - `Table.temporal` carries history table and period columns.
+  - `--temporal-history` on `generate`/`run` performs a deterministic,
+    constraint-aware `UPDATE` on each temporal table so SQL Server writes
+    history rows.
+  - Temporal tables use `DELETE` instead of `TRUNCATE` during generation.
+- **BULK INSERT writer** for on-prem SQL Server (`--method bulk`).
+  - TSV staging with `BULK INSERT`, `TABLOCK`, `CHECK_CONSTRAINTS`,
+    `KEEPIDENTITY`, `FIRE_TRIGGERS`.
+  - `--bulk-dir` (server path) and `--bulk-local-dir` (client path) support
+    shared volumes and Docker.
+  - Azure SQL rejects it (`bulk_insert_from_file=False`).
+- SQL Server integration tests for temporal history and BULK INSERT (the latter
+  gated by `PGPROOF_MSSQL_BULK_LOCAL`/`PGPROOF_MSSQL_BULK_SERVER`).
+
+### Measured
+
+- 162 tests; all pass with PostgreSQL 16 and SQL Server 2022 Developer.
+
 ## [0.9.5] — 2026-11-11
 
 ### Added

@@ -228,7 +228,10 @@ Generates rows into the target database, or into a `.sql` file. Does not verify.
 | `--seed` | `42` | Deterministic seed |
 | `--table-rows` | — | Per-table overrides |
 | `--truncate/--no-truncate` | truncate | Truncate the target first, or emit `TRUNCATE` in the SQL file |
-| `--method` | `copy` | `copy` or `insert` (database mode) |
+| `--method` | `copy` | `copy`, `insert` or `bulk` (SQL Server on-prem) |
+| `--bulk-dir` | — | Server-visible directory for `BULK INSERT` |
+| `--bulk-local-dir` | — | Client directory mapped to `--bulk-dir` |
+| `--temporal-history` | off | Update temporal tables to create history rows |
 | `--catalog` | — | Reuse a saved catalog JSON |
 | `--profile` | — | Profile JSON from `pgproof profile` |
 
@@ -282,6 +285,9 @@ It accepts every option from `generate` and `verify`, plus:
 | `--profile` | — | Profile JSON |
 | `--format` | `json,html,junit` | Report formats |
 | `--fail-on` | `fail` | Exit policy |
+| `--temporal-history` | off | Update temporal tables to create history rows |
+| `--method bulk` | — | Use `BULK INSERT` (on-prem SQL Server only) |
+| `--bulk-dir` / `--bulk-local-dir` | — | Server / client directories for `BULK INSERT` |
 
 ```bash
 pgproof run \

@@ -166,8 +166,10 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
   verifier reports it as unsupported when a catalog carries one.
 - Partition functions/schemes are mapped to a single canonical range node. The
   generator samples inside the boundary range; SQL Server routes the rows.
-- Temporal tables: system-period columns are marked non-writable; history table
-  generation is not implemented.
+- Temporal tables: system-period columns are marked non-writable. With
+  `--temporal-history`, pgproof updates one safe column per temporal table so
+  SQL Server writes one history version per current row. The history periods
+  are not yet verified as invariants.
 - Filtered unique indexes are modeled as `UniqueConstraint.predicate`; the generator enforces them only inside the predicate and the verifier uses the filtered scope.
 - `TRUNCATE` with foreign keys falls back to FK-ordered `DELETE`.
 - `IDENTITY` values are inserted with `SET IDENTITY_INSERT`; sequences are
@@ -180,7 +182,11 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
 - Azure SQL is implemented through the `azuresql` dialect (single database,
   transient retries, no local-file `BULK INSERT`), but it has not been tested
   against a live Azure instance yet.
-- `BULK INSERT` and full temporal history are not covered yet.
+- `BULK INSERT` is implemented for on-prem SQL Server only. It requires a
+  directory visible to the SQL Server service (`--bulk-dir`) and optionally a
+  client directory mapped to it (`--bulk-local-dir`). Azure SQL rejects it.
+- Temporal history is generated through updates, not by replaying a full
+  version chain. Period overlap/coverage verification is still pending.
 
 ## Dialect limits
 

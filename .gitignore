@@ -9,3 +9,4 @@ build/
 proof/
 *.log
 .DS_Store
+.bulk/
