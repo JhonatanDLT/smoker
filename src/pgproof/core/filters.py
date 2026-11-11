@@ -66,4 +66,5 @@ def filter_catalog(
         objects=catalog.objects,
         rules=catalog.rules,
         databases=catalog.databases,
+        warnings=catalog.warnings,
     )

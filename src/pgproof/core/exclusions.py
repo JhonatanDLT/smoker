@@ -531,20 +531,23 @@ def next_value(
     seed: int,
 ) -> Any:
     kind = column.data_kind
+    step = 1 + max(0, int(attempt))
     if kind in (DataKind.SMALLINT, DataKind.INT, DataKind.BIGINT):
-        return int(current or 0) + 1
+        return int(current or 0) + step
     if kind == DataKind.NUMERIC:
-        return Decimal(str(current or 0)) + 1
+        return Decimal(str(current or 0)) + step
     if kind == DataKind.FLOAT:
-        return float(current or 0) + 1.0
+        return float(current or 0) + float(step)
     if kind == DataKind.DATE:
-        return (current or _BASE_DATE) + timedelta(days=1)
+        return (current or _BASE_DATE) + timedelta(days=step)
     if kind in (DataKind.TIMESTAMP, DataKind.TIMESTAMPTZ):
         value = current or _BASE_DATETIME
-        return value + timedelta(seconds=1)
+        return value + timedelta(seconds=step)
     if kind == DataKind.TIME:
         value = current or time(9, 0, 0)
-        return (datetime.combine(date(2000, 1, 1), value) + timedelta(seconds=1)).time()
+        return (
+            datetime.combine(date(2000, 1, 1), value) + timedelta(seconds=step)
+        ).time()
     if kind == DataKind.UUID:
         return str(
             uuid.uuid5(

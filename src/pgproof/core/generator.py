@@ -1092,7 +1092,9 @@ class Generator:
                 continue
 
             partition_columns = set(all_partition_columns(table))
-            blocked = set(partition_columns) | set(predicate_columns(predicate))
+            blocked = set(partition_columns) | (
+                set(predicate_columns(predicate)) - set(key_columns)
+            )
             candidates = [
                 name
                 for name in key_columns

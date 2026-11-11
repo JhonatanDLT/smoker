@@ -16,6 +16,7 @@ from pgproof.application.generate import GenerateDataset
 from pgproof.application.verify import VerifyDataset, VerifyRequest
 from pgproof.core.exclusions import (
     build_exclusion_specs,
+    next_value,
     parse_exclusion_definition,
     predicate_columns,
     predicate_matches,
@@ -272,3 +273,11 @@ def test_live_introspection_reads_exclusion_constraints() -> None:
         ("during", "&&"),
     ]
     assert exclusion.predicate == "(active)"
+
+
+def test_next_value_advances_with_each_attempt() -> None:
+    column = Column("seat", "integer", nullable=False)
+
+    assert next_value(column, 4, 3, 0, 1) == 5
+    assert next_value(column, 4, 3, 3, 1) == 8
+    assert next_value(column, 4, 3, 0, 1) != next_value(column, 4, 3, 1, 1)

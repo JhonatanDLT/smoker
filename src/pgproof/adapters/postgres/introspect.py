@@ -101,6 +101,29 @@ WHERE con.contype IN ('p', 'f', 'u', 'c', 'x')
 ORDER BY n.nspname, c.relname, con.conname
 """
 
+_PARTIAL_UNIQUE_SQL = """
+SELECT n.nspname AS schema,
+       c.relname AS table_name,
+       i.relname AS index_name,
+       pg_get_expr(ix.indpred, ix.indrelid, true) AS predicate,
+       ix.indnkeyatts::int AS key_attnums,
+       ix.indkey::text AS key_columns
+FROM pg_index ix
+JOIN pg_class i ON i.oid = ix.indexrelid
+JOIN pg_class c ON c.oid = ix.indrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE ix.indisunique
+  AND ix.indpred IS NOT NULL
+  AND ix.indisvalid
+  AND NOT ix.indisprimary
+  AND c.relkind IN ('r', 'p')
+  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+  AND NOT EXISTS (
+      SELECT 1 FROM pg_constraint con WHERE con.conindid = ix.indexrelid
+  )
+ORDER BY n.nspname, c.relname, i.relname
+"""
+
 _TRIGGERS_SQL = """
 SELECT n.nspname AS schema,
        c.relname AS table_name,
@@ -321,6 +344,38 @@ def introspect(conn: psycopg.Connection) -> Catalog:
                     )
                 )
 
+    warnings: list[str] = []
+    with conn.cursor() as cur:
+        cur.execute(_PARTIAL_UNIQUE_SQL)
+        for schema, table_name, index_name, predicate, key_attnums, key_columns in (
+            cur.fetchall()
+        ):
+            table = tables.get(f"{schema}.{table_name}")
+            if table is None:
+                continue
+            attmap = attnum_maps.get(f"{schema}.{table_name}", {})
+            numbers = [int(part) for part in str(key_columns).split()][: int(key_attnums)]
+            if any(number <= 0 for number in numbers):
+                warnings.append(
+                    f"partial unique index {schema}.{index_name} uses an "
+                    "expression and is not modeled"
+                )
+                continue
+            columns = [attmap.get(number) for number in numbers]
+            if any(column is None for column in columns):
+                warnings.append(
+                    f"partial unique index {schema}.{index_name} references "
+                    "unknown columns and is not modeled"
+                )
+                continue
+            table.uniques.append(
+                UniqueConstraint(
+                    name=index_name,
+                    columns=[str(column) for column in columns],
+                    predicate=str(predicate),
+                )
+            )
+
     with conn.cursor() as cur:
         cur.execute(_TRIGGERS_SQL)
         for row in cur.fetchall():
@@ -368,6 +423,7 @@ def introspect(conn: psycopg.Connection) -> Catalog:
         tables=sorted(tables.values(), key=lambda table: table.key),
         schemas=sorted({table.schema for table in tables.values()}),
         functions=functions,
+        warnings=warnings,
     )
 
 

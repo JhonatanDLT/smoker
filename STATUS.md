@@ -1,7 +1,7 @@
 # Status
 
 **Date:** 2026-11-11
-**Version:** 0.9.8
+**Version:** 0.9.9
 **State:** working v1 plus CI output, repair loop, distribution-aware
 generation, partitioned tables, offline schema dumps, segmentation rules, a
 dependency-safe creation order, SQL export, exclusion-aware generation, a
@@ -35,7 +35,8 @@ implemented but not yet tested against a live Azure instance.
 | **T-SQL dump loader, profiler and range partitions** | ✅ |
 | **Stored procedures** with parameters, body and creation order | ✅ |
 | **T-SQL segmentation** (`IF ... THROW/RAISERROR`) | ✅ report-only |
-| **Filtered unique indexes** with predicate-aware generation/verification | ✅ |
+| **Filtered unique indexes** with predicate-aware generation/verification | ✅ PostgreSQL + SQL Server |
+| **Partial unique index introspection** and unsupported-index warnings | ✅ |
 | **Multi-database SQL Server** (`--databases`, three-part keys) | ✅ |
 | **Azure SQL dialect** (`azuresql`, single database, retries) | ✅ |
 | **Temporal history generation** (`--temporal-history`) | ✅ |
@@ -127,7 +128,7 @@ implemented but not yet tested against a live Azure instance.
   dump loader, profiler and range partitions are implemented and registered as
   `--dialect sqlserver`; integration tests run against SQL Server 2022
   Developer.
-- **167 tests passing** with both `PGPROOF_TEST_DSN` and `PGPROOF_MSSQL_DSN`:
+- **170 tests passing** with both `PGPROOF_TEST_DSN` and `PGPROOF_MSSQL_DSN`:
   PostgreSQL 16 plus SQL Server 2022 Developer in a container.
 - SQL Server integration covers source introspection, verification, generation,
   identity/computed/rowversion, `varbinary`/`uniqueidentifier`/`datetime2`,

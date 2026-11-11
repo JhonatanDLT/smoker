@@ -64,7 +64,9 @@ class VerifyDataset:
             workers=self.workers,
         )
         counts = self.runner.table_counts(self.catalog.table_keys)
-        warnings = self.runner.unvalidated_constraints()
+        warnings = self.runner.unvalidated_constraints() + list(
+            self.catalog.warnings
+        )
         plan = request.plan or build_plan(self.catalog, rows=0, seed=self.seed)
         return build_report(
             self.catalog,

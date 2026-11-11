@@ -4,6 +4,23 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [0.9.9] — 2026-11-11
+
+### Added
+
+- **PostgreSQL partial unique indexes.** Live introspection and the dump
+  loader keep `UniqueConstraint.predicate`, so generation and verification
+  scope uniqueness exactly like SQL Server filtered indexes.
+- **`Catalog.warnings`.** Unsupported objects (for example expression-based
+  unique indexes) are reported instead of silently dropped.
+- Unique-key adjustment now advances numerically on every attempt. A unique
+  key whose predicate references the key column itself no longer blocks its
+  own adjustment.
+
+### Measured
+
+- 170 tests; all pass with PostgreSQL 16 and SQL Server 2022 Developer.
+
 ## [0.9.8] — 2026-11-11
 
 ### Added

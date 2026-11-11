@@ -107,6 +107,18 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
 - `ALTER TABLE ... ATTACH PARTITION` is processed; `DETACH PARTITION` and
   `DETACH PARTITION ... CONCURRENTLY` are not.
 
+## Partial unique indexes
+
+- PostgreSQL partial unique indexes on plain columns are modeled in live
+  catalogs and dumps. Generation enforces them only for rows that satisfy the
+  predicate and verification scopes the uniqueness query the same way.
+- Expression-based partial unique indexes (for example `lower(email)`) are
+  skipped because the catalog cannot model expressions; the report includes a
+  warning naming the index.
+- Unknown predicates are enforced globally by the generator (stricter, never
+  looser). Verification always evaluates the real predicate.
+- SQL Server filtered unique indexes follow the same model.
+
 ## Creation-order limits
 
 - View dependencies come from the parsed `SELECT`; dependencies inside dynamic

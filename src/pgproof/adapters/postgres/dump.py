@@ -218,6 +218,7 @@ class DumpLoader:
         self.search_path: list[str] = ["public"]
         self.schemas: set[str] = {"public"}
         self.database = "dump"
+        self.warnings: list[str] = []
 
     # ------------------------------------------------------------------ entry
     def load(self, sql: str) -> Catalog:
@@ -242,6 +243,7 @@ class DumpLoader:
             functions=self.functions,
             objects=self.objects,
             rules=self.rules,
+            warnings=self.warnings,
         )
 
     def _statement(self, statement: str) -> None:
@@ -848,12 +850,21 @@ class DumpLoader:
             if isinstance(target, exp.Column):
                 columns.append(target.name)
             else:
+                self.warnings.append(
+                    f"unique index {index.name} on {table.key} uses an "
+                    "expression and is not modeled"
+                )
                 return
+        predicate = None
+        where = getattr(params, "args", {}).get("where") if params else None
+        if isinstance(where, exp.Where):
+            predicate = where.this.sql(dialect="postgres")
         if columns:
             table.uniques.append(
                 UniqueConstraint(
                     name=index.name or f"{table.name}_{columns[0]}_key",
                     columns=columns,
+                    predicate=predicate,
                     provenance=self._prov("dump", statement, "unique_index"),
                 )
             )

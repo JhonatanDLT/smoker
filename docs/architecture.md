@@ -102,6 +102,7 @@ exists.
 | Columns, defaults | `pg_attribute`, `pg_attrdef`, `pg_get_expr` |
 | Types and enums | `pg_type`, `pg_enum` |
 | Constraints | `pg_constraint`, `pg_get_constraintdef` |
+| Partial unique indexes | `pg_index`, `pg_get_expr(indpred)` |
 | Triggers and functions | `pg_trigger`, `pg_proc`, `pg_get_functiondef` |
 | Sequences | `pg_get_serial_sequence`, `pg_sequence` |
 
@@ -112,6 +113,13 @@ CHECK (amount = (quantity::numeric * unit_price))
 
 The extractor strips `CHECK (...)` and the rule parser tolerates casts,
 parentheses and `NOT VALID`.
+
+Partial unique indexes are read from `pg_index` (not `pg_constraint`). Their
+`indpred` expression becomes `UniqueConstraint.predicate`, so generation
+enforces uniqueness only for matching rows and verification adds the predicate
+to the uniqueness query. Expression-based indexes (for example
+`lower(email)`) cannot be represented as a column list; they are skipped and
+recorded in `Catalog.warnings`, which the report surfaces as a warning.
 
 ### Filters and function deduplication
 

@@ -577,3 +577,28 @@ def test_view_filter_is_an_aggregate_candidate() -> None:
     assert rule.provenance is not None
     assert rule.provenance.kind == "view"
     assert catalog.table("public.orders").checks == []
+
+
+def test_partial_unique_index_keeps_predicate_and_warns_on_expression() -> None:
+    dump = """
+    CREATE TABLE public.users (
+        id integer PRIMARY KEY,
+        email text NOT NULL,
+        seat integer NOT NULL,
+        deleted_at timestamp NULL
+    );
+    CREATE UNIQUE INDEX uq_users_seat ON public.users (seat)
+        WHERE deleted_at IS NULL;
+    CREATE UNIQUE INDEX uq_users_lower_email ON public.users (lower(email))
+        WHERE deleted_at IS NULL;
+    """
+    catalog = DumpLoader().load(dump)
+    users = catalog.table("public.users")
+
+    predicate_index = next(
+        item for item in users.uniques if item.name == "uq_users_seat"
+    )
+    assert predicate_index.columns == ["seat"]
+    assert predicate_index.predicate is not None
+    assert "deleted_at" in predicate_index.predicate
+    assert any("expression" in warning for warning in catalog.warnings)

@@ -350,6 +350,7 @@ class Catalog:
     objects: list[SqlObject] = field(default_factory=list)
     rules: list[RuleCandidate] = field(default_factory=list)
     databases: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     def table(self, key: str) -> Table:
         for table in self.tables:
@@ -486,6 +487,7 @@ class Catalog:
                 for obj in data.get("objects", [])
             ],
             databases=list(data.get("databases", [])),
+            warnings=list(data.get("warnings", [])),
             rules=[
                 RuleCandidate(
                     id=rule.get("id", ""),

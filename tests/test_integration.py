@@ -17,7 +17,16 @@ import pytest
 from pgproof.adapters.postgres.dialect import PostgresDialect
 from pgproof.adapters.postgres.introspect import connect, introspect, table_counts
 from pgproof.adapters.postgres.query_runner import PostgresQueryRunner
-from pgproof.adapters.postgres.writer import reset_sequences, truncate, write_table
+from pgproof.adapters.postgres.writer import (
+    PostgresRowWriter,
+    reset_sequences,
+    truncate,
+    write_table,
+)
+from pgproof.adapters.spec.yaml_loader import YamlSpecLoader
+from pgproof.application.generate import GenerateDataset
+from pgproof.application.verify import VerifyDataset, VerifyRequest
+from pgproof.core.filters import filter_catalog
 from pgproof.core.generator import Generator
 from pgproof.core.invariants import invariants_from_catalog
 from pgproof.core.planner import build_plan
@@ -73,3 +82,68 @@ def test_same_seed_same_rows() -> None:
         for key in plan.order
     }
     assert first == second
+
+
+@pytest.mark.skipif(not DSN, reason="PGPROOF_TEST_DSN is not set")
+def test_partial_unique_index_is_generated_and_verified() -> None:
+    assert DSN
+    connection = psycopg.connect(DSN)
+    try:
+        connection.execute("DROP TABLE IF EXISTS public.pgproof_partial")
+        connection.execute(
+            """
+            CREATE TABLE public.pgproof_partial (
+                id integer PRIMARY KEY,
+                seat integer NOT NULL CHECK (seat BETWEEN 1 AND 20)
+            )
+            """
+        )
+        connection.execute(
+            "CREATE UNIQUE INDEX uq_partial_seat "
+            "ON public.pgproof_partial (seat) WHERE seat IS NOT NULL"
+        )
+        connection.execute(
+            "CREATE UNIQUE INDEX uq_partial_expr "
+            "ON public.pgproof_partial ((seat + 0)) WHERE seat IS NOT NULL"
+        )
+        connection.commit()
+        catalog = filter_catalog(introspect(connection), include=["pgproof_partial"])
+    finally:
+        connection.close()
+
+    table = catalog.table("public.pgproof_partial")
+    seat_index = next(item for item in table.uniques if item.name == "uq_partial_seat")
+    assert seat_index.columns == ["seat"]
+    assert seat_index.predicate is not None
+    assert any("expression" in warning for warning in catalog.warnings)
+
+    connection = psycopg.connect(DSN)
+    writer = PostgresRowWriter(connection)
+    try:
+        generated = GenerateDataset(catalog, writer, rows=20, seed=11).execute()
+    finally:
+        writer.close()
+        connection.close()
+
+    connection = psycopg.connect(DSN)
+    try:
+        report = VerifyDataset(
+            catalog,
+            PostgresQueryRunner(connection),
+            YamlSpecLoader(),
+            PostgresDialect(),
+            seed=11,
+        ).execute(
+            VerifyRequest(dataset_hash=generated.dataset_hash, plan=generated.plan)
+        )
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT count(DISTINCT seat) FROM public.pgproof_partial")
+            distinct = int(cursor.fetchone()[0])
+        connection.execute("DROP TABLE public.pgproof_partial")
+        connection.commit()
+    finally:
+        connection.close()
+
+    assert distinct == 20
+    assert report.verdict == "PASS"
+    assert any("expression" in warning for warning in report.warnings)
