@@ -1,7 +1,7 @@
 # Status
 
 **Date:** 2026-11-11
-**Version:** 0.9.2
+**Version:** 0.9.3
 **State:** working v1 plus CI output, repair loop, distribution-aware
 generation, partitioned tables, offline schema dumps, segmentation rules, a
 dependency-safe creation order, SQL export, exclusion-aware generation, a
@@ -56,6 +56,7 @@ SQL Server 2022.
 | JSON + HTML + **JUnit XML** report | ✅ |
 | `--fail-on never/error/fail` (shadow mode) | ✅ |
 | **GitHub Action** with annotations and job summary | ✅ |
+| **CI matrix** with PostgreSQL 16 + SQL Server 2022 service containers | ✅ |
 | **Schema readiness audit** (`pgproof audit`) | ✅ |
 | **Repair loop** with fixed-point limit and residual reporting | ✅ |
 | **Distribution profiling** (`pgproof profile`) and profile-aware generation | ✅ |
@@ -209,11 +210,10 @@ See [`docs/limitations.md`](docs/limitations.md).
 
 ## Next tasks
 
-1. Add SQL Server to CI (container + `PGPROOF_MSSQL_DSN`) and keep it green.
-2. Azure SQL, temporal history, filtered unique indexes and `BULK INSERT` for
+1. Azure SQL, temporal history, filtered unique indexes and `BULK INSERT` for
    full SQL Server parity.
-3. Column correlations and parallel verification.
-4. Publish to PyPI and the GitHub Marketplace; first design-partner pilot.
+2. Column correlations and parallel verification.
+3. Publish to PyPI and the GitHub Marketplace; first design-partner pilot.
 
 ## Decision rules
 

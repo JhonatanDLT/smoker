@@ -37,7 +37,7 @@ The repository ships a composite action at the root.
 
 `version: source` installs the checkout that contains the action. That is the
 right value while pgproof is not published to PyPI. Once it is, set
-`version: 0.9.2`.
+`version: 0.9.3`.
 
 ### Outputs
 
@@ -91,6 +91,31 @@ The action:
 6. Fails the job if pgproof exited non-zero.
 
 A full example is in `examples/github-actions/ci.yml`.
+
+### SQL Server service container
+
+The repository CI (`.github/workflows/ci.yml`) runs both PostgreSQL and SQL
+Server. The SQL Server service needs the ODBC driver on the runner:
+
+```yaml
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    env:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Pgproof!2026Strong"
+    ports: ["1433:1433"]
+    options: >-
+      --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Pgproof!2026Strong' -C -Q 'SELECT 1'"
+      --health-interval 10s --health-timeout 5s --health-retries 30
+
+env:
+  PGPROOF_MSSQL_DSN: "DRIVER={ODBC Driver 18 for SQL Server};SERVER=127.0.0.1,1433;DATABASE=master;UID=sa;PWD=Pgproof!2026Strong;TrustServerCertificate=yes;Encrypt=yes"
+```
+
+Install `msodbcsql18` from the Microsoft Ubuntu repository and run
+`pip install -e ".[dev,sqlserver]"`. Then `pytest -m integration` exercises
+both dialects.
 
 ## GitLab CI
 

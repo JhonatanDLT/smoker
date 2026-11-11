@@ -4,6 +4,20 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [0.9.3] — 2026-11-11
+
+### Added
+
+- **CI matrix for PostgreSQL and SQL Server.** `.github/workflows/ci.yml` runs
+  PostgreSQL 16 and SQL Server 2022 Developer service containers, installs
+  ODBC Driver 18, runs unit tests, prepares the PostgreSQL fixture and runs the
+  integration suite with both DSNs.
+- Documentation for the SQL Server CI service container.
+
+### Measured
+
+- 148 tests, including the SQL Server integration suite.
+
 ## [0.9.2] — 2026-11-11
 
 ### Added

@@ -75,7 +75,7 @@ open proof/report.html
 Expected output:
 
 ```
-pgproof 0.9.2 · 10 tables · 2,000 rows · seed 42
+pgproof 0.9.3 · 10 tables · 2,000 rows · seed 42
   generate billing.accounts        200 rows
   generate billing.plans           200 rows
   ...
