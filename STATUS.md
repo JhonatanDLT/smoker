@@ -1,7 +1,7 @@
 # Status
 
 **Date:** 2026-11-11
-**Version:** 0.9.7
+**Version:** 0.9.8
 **State:** working v1 plus CI output, repair loop, distribution-aware
 generation, partitioned tables, offline schema dumps, segmentation rules, a
 dependency-safe creation order, SQL export, exclusion-aware generation, a
@@ -40,6 +40,7 @@ implemented but not yet tested against a live Azure instance.
 | **Azure SQL dialect** (`azuresql`, single database, retries) | ✅ |
 | **Temporal history generation** (`--temporal-history`) | ✅ |
 | **Temporal period/overlap invariants** (`temporal` checks) | ✅ |
+| **Parallel verification** (`--jobs N`) | ✅ |
 | **`BULK INSERT` writer** (`--method bulk`) | ✅ on-prem |
 | **Dialect-aware invariant SQL, SQL export and report label** | ✅ |
 | **`--dialect` extension point** (PostgreSQL + SQL Server) | ✅ |
@@ -126,7 +127,7 @@ implemented but not yet tested against a live Azure instance.
   dump loader, profiler and range partitions are implemented and registered as
   `--dialect sqlserver`; integration tests run against SQL Server 2022
   Developer.
-- **164 tests passing** with both `PGPROOF_TEST_DSN` and `PGPROOF_MSSQL_DSN`:
+- **167 tests passing** with both `PGPROOF_TEST_DSN` and `PGPROOF_MSSQL_DSN`:
   PostgreSQL 16 plus SQL Server 2022 Developer in a container.
 - SQL Server integration covers source introspection, verification, generation,
   identity/computed/rowversion, `varbinary`/`uniqueidentifier`/`datetime2`,
@@ -220,7 +221,7 @@ See [`docs/limitations.md`](docs/limitations.md).
 ## Next tasks
 
 1. Run a live Azure SQL smoke test (Entra ID, firewall, serverless retries).
-2. Column correlations and parallel verification.
+2. Column correlations for conditional and multi-column rules.
 3. Publish to PyPI and the GitHub Marketplace; first design-partner pilot.
 
 ## Decision rules

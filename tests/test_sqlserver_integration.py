@@ -110,6 +110,27 @@ def test_sqlserver_generation_and_verification() -> None:
 
     assert report.verdict == "PASS"
 
+    parallel_connection = connect(MSSQL_DSN)
+    try:
+        parallel = VerifyDataset(
+            catalog,
+            SqlServerQueryRunner(parallel_connection),
+            YamlSpecLoader(),
+            SqlServerDialect(),
+            seed=7,
+            workers=3,
+            runner_factory=lambda: SqlServerQueryRunner(connect(MSSQL_DSN)),
+        ).execute(
+            VerifyRequest(dataset_hash=generated.dataset_hash, plan=generated.plan)
+        )
+    finally:
+        parallel_connection.close()
+
+    assert parallel.verdict == "PASS"
+    assert [item.id for item in parallel.results] == [
+        item.id for item in report.results
+    ]
+
 
 def _create_rich_schema(connection) -> None:
     with _cursor(connection) as cursor:

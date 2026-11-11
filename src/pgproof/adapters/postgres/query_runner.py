@@ -32,6 +32,9 @@ class PostgresQueryRunner:
     def __init__(self, connection: psycopg.Connection) -> None:
         self.connection = connection
 
+    def close(self) -> None:
+        self.connection.close()
+
     def count(self, sql: str) -> int:
         with self.connection.cursor() as cur:
             cur.execute(f"SELECT count(*) FROM ({sql}) AS violations")

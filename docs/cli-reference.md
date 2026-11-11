@@ -260,6 +260,7 @@ Verifies invariants against an existing dataset. Does not generate.
 | `--spec` | — | YAML with application rules |
 | `--out`, `-o` | `proof` | Output directory |
 | `--sample` | `5` | Rows shown per failure |
+| `--jobs` | `1` | Parallel verification connections |
 | `--seed` | `42` | Seed recorded in the report |
 | `--catalog` | — | Reuse a saved catalog JSON |
 | `--format` | `json,html,junit` | Report formats |
@@ -286,6 +287,7 @@ It accepts every option from `generate` and `verify`, plus:
 | `--format` | `json,html,junit` | Report formats |
 | `--fail-on` | `fail` | Exit policy |
 | `--temporal-history` | off | Update temporal tables to create history rows |
+| `--jobs` | `1` | Parallel verification connections |
 | `--method bulk` | — | Use `BULK INSERT` (on-prem SQL Server only) |
 | `--bulk-dir` / `--bulk-local-dir` | — | Server / client directories for `BULK INSERT` |
 

@@ -26,6 +26,9 @@ class SqlServerQueryRunner:
         self.connection = connection
         self.dialect = dialect or SqlServerDialect()
 
+    def close(self) -> None:
+        self.connection.close()
+
     def count(self, sql: str) -> int:
         with _cursor(self.connection) as cursor:
             cursor.execute(self.dialect.count_sql(sql))

@@ -225,6 +225,16 @@ the team actually has.
 Repairs are explicit on purpose. Inverting arbitrary SQL is a research problem;
 a declared `UPDATE` is auditable and safe.
 
+## Parallel verification
+
+`verify_all` accepts `runner_factory` and `workers`. When `workers > 1` it
+creates one `QueryRunner` per worker, splits the invariant list into contiguous
+chunks and runs the chunks in threads. Each connection belongs to exactly one
+worker, and every factory-created runner is closed before the report returns.
+The report keeps catalog order, so `--jobs` changes latency, never the verdict
+or the report layout. If worker connections cannot be opened, verification
+falls back to the primary connection instead of failing the run.
+
 ## Verification
 
 | Level | What it checks |

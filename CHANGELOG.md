@@ -4,6 +4,22 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [0.9.8] — 2026-11-11
+
+### Added
+
+- **Parallel verification** with `--jobs N` on `verify` and `run`.
+  - One connection per worker; checks are split into contiguous chunks.
+  - Report order, ids and verdict are identical to a serial run.
+  - Worker connections are closed before the report is returned; if they
+    cannot be opened, verification falls back to the primary connection.
+- Thread-pool and worker-lifecycle unit tests; SQL Server parallel verification
+  integration test.
+
+### Measured
+
+- 167 tests; all pass with PostgreSQL 16 and SQL Server 2022 Developer.
+
 ## [0.9.7] — 2026-11-11
 
 ### Added

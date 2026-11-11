@@ -665,6 +665,7 @@ def verify_cmd(
     spec: Path | None = typer.Option(None, "--spec", help="YAML file with app-level rules"),
     out: Path = typer.Option(Path("proof"), "--out", "-o"),
     sample: int = typer.Option(5, "--sample", help="Rows to show per failure"),
+    jobs: int = typer.Option(1, "--jobs", help="Parallel verification connections"),
     seed: int = typer.Option(42, "--seed"),
     catalog_path: Path | None = typer.Option(None, "--catalog"),
     format: str = typer.Option(
@@ -686,8 +687,16 @@ def verify_cmd(
 ) -> None:
     """Verify every invariant against the target database."""
     adapter = _adapter(dialect)
+    if jobs < 1:
+        _fail("--jobs must be at least 1")
+        return
     target_dsn = _dsn(dsn, dsn_env)
     connection = _connect(adapter, target_dsn)
+    runner_factory = (
+        (lambda: adapter.query_runner(adapter.connect(target_dsn)))
+        if jobs > 1
+        else None
+    )
     try:
         catalog = _load_catalog(
             catalog_path, target_dsn, schema, include, exclude, schema_file, dialect,
@@ -699,6 +708,8 @@ def verify_cmd(
             YamlSpecLoader(),
             adapter.dialect,
             seed=seed,
+            runner_factory=runner_factory,
+            workers=jobs,
         )
         report = use_case.execute(
             VerifyRequest(
@@ -747,6 +758,7 @@ def run_cmd(
         help="After loading, update temporal tables to create history rows",
     ),
     sample: int = typer.Option(5, "--sample"),
+    jobs: int = typer.Option(1, "--jobs", help="Parallel verification connections"),
     catalog_path: Path | None = typer.Option(None, "--catalog"),
     format: str = typer.Option(
         "json,html,junit", "--format", help="Comma-separated: json,html,junit"
@@ -794,6 +806,9 @@ def run_cmd(
     if bulk and not bulk_dir:
         _fail("--method bulk requires --bulk-dir")
         return
+    if jobs < 1:
+        _fail("--jobs must be at least 1")
+        return
     connection = _connect(adapter, target_dsn)
     if bulk:
         assert bulk_dir is not None
@@ -827,6 +842,12 @@ def run_cmd(
         YamlSpecLoader(),
         adapter.dialect,
         seed=seed,
+        runner_factory=(
+            (lambda: adapter.query_runner(adapter.connect(target_dsn)))
+            if jobs > 1
+            else None
+        ),
+        workers=jobs,
     )
     repair = RepairDataset(
         adapter.query_runner(connection),

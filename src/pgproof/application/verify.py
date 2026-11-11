@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from ..core.dialect import SqlDialect
@@ -33,12 +34,16 @@ class VerifyDataset:
         spec_loader: SpecLoader,
         dialect: SqlDialect,
         seed: int = 42,
+        runner_factory: Callable[[], QueryRunner] | None = None,
+        workers: int = 1,
     ) -> None:
         self.catalog = catalog
         self.runner = runner
         self.spec_loader = spec_loader
         self.dialect = dialect
         self.seed = seed
+        self.runner_factory = runner_factory
+        self.workers = workers
 
     def invariants_for(self, spec_path: str | None) -> list[Invariant]:
         extra = self.spec_loader.load(spec_path) if spec_path else []
@@ -51,7 +56,13 @@ class VerifyDataset:
 
     def execute(self, request: VerifyRequest) -> Report:
         invariants = request.invariants or self.invariants_for(request.spec_path)
-        verification = verify_all(self.runner, invariants, sample_limit=request.sample)
+        verification = verify_all(
+            self.runner,
+            invariants,
+            sample_limit=request.sample,
+            runner_factory=self.runner_factory,
+            workers=self.workers,
+        )
         counts = self.runner.table_counts(self.catalog.table_keys)
         warnings = self.runner.unvalidated_constraints()
         plan = request.plan or build_plan(self.catalog, rows=0, seed=self.seed)
