@@ -85,15 +85,18 @@ _SEMANTIC_PATTERNS: list[tuple[str, str]] = [
 ]
 
 _RANGE_RE = re.compile(
-    r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(>=|<=|>|<)\s*(-?\d+(?:\.\d+)?)"
+    r"\[?([a-zA-Z_][a-zA-Z0-9_]*)\]?\s*(>=|<=|>|<)\s*\(*\s*"
+    r"(-?\d+(?:\.\d+)?)\s*\)*"
 )
-_IN_RE = re.compile(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s+IN\s*\(([^)]*)\)", re.IGNORECASE)
+_IN_RE = re.compile(
+    r"\[?([a-zA-Z_][a-zA-Z0-9_]*)\]?\s+IN\s*\(([^)]*)\)", re.IGNORECASE
+)
 _ANY_RE = re.compile(
-    r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*ANY\s*\(\s*(?:ARRAY\s*)?\[([^\]]*)\]",
+    r"\[?([a-zA-Z_][a-zA-Z0-9_]*)\]?\s*=\s*ANY\s*\(\s*(?:ARRAY\s*)?\[([^\]]*)\]",
     re.IGNORECASE,
 )
 _LEN_RE = re.compile(
-    r"(?:char_length|length)\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\)\s*<=\s*(\d+)",
+    r"(?:char_length|length)\s*\(\s*\[?([a-zA-Z_][a-zA-Z0-9_]*)\]?\s*\)\s*<=\s*(\d+)",
     re.IGNORECASE,
 )
 _STRING_RE = re.compile(r"'((?:[^']|'')*)'")
@@ -210,23 +213,25 @@ def parse_local_rules(table: Table) -> LocalRules:
         known_columns = {column.name for column in table.columns}
         cast = r"(?:::[\w]+(?:\s+[\w]+)?)?"
         for target, left, operator, right in re.findall(
-            rf"\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\(*\s*([A-Za-z_][A-Za-z0-9_]*){cast}"
-            rf"\s*([+\-*/])\s*([A-Za-z_][A-Za-z0-9_]*){cast}\s*\)*",
+            rf"\[?([A-Za-z_][A-Za-z0-9_]*)\]?\s*=\s*\(*\s*"
+            rf"\[?([A-Za-z_][A-Za-z0-9_]*)\]?{cast}"
+            rf"\s*([+\-*/])\s*\[?([A-Za-z_][A-Za-z0-9_]*)\]?{cast}\s*\)*",
             predicate,
         ):
             if target in known_columns and left in known_columns and right in known_columns:
                 rules.derived.append((target, left, operator, right))
                 matched = True
         for target, source in re.findall(
-            r"\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\b"
-            r"(?!\s*[+\-*/])",
+            r"\[?([A-Za-z_][A-Za-z0-9_]*)\]?\s*=\s*"
+            r"\[?([A-Za-z_][A-Za-z0-9_]*)\]?\b(?!\s*[+\-*/])",
             predicate,
         ):
             if target in known_columns and source in known_columns and target != source:
                 rules.derived.append((target, source, "copy", ""))
                 matched = True
         for left, operator, right in re.findall(
-            rf"\b([A-Za-z_][A-Za-z0-9_]*){cast}\s*(>=|<=|>|<)\s*([A-Za-z_][A-Za-z0-9_]*){cast}\b",
+            rf"\[?([A-Za-z_][A-Za-z0-9_]*)\]?{cast}\s*(>=|<=|>|<)\s*"
+            rf"\[?([A-Za-z_][A-Za-z0-9_]*)\]?{cast}\b",
             predicate,
         ):
             if left in known_columns and right in known_columns:
@@ -295,7 +300,7 @@ def invariants_from_catalog(catalog: Catalog, dialect: SqlDialect) -> list[Invar
                     table=table.key,
                     columns=list(unique.columns),
                     description=f"{table.key}({', '.join(unique.columns)}) is unique",
-                    violation_sql=dialect.unique_sql(table, unique.columns),
+                    violation_sql=dialect.unique_sql(table, unique.columns, unique.predicate),
                     provenance=unique.provenance.source if unique.provenance else None,
                 )
             )

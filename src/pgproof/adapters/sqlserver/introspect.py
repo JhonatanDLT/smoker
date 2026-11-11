@@ -221,7 +221,7 @@ def _constraints(conn: Any, tables: dict[str, Table]) -> None:
             """
         )
         indexes: dict[tuple[int, int], list[str]] = defaultdict(list)
-        metadata: dict[tuple[int, int], tuple[str, bool, bool, bool]] = {}
+        metadata: dict[tuple[int, int], tuple[str, bool, bool, bool, Any]] = {}
         for row in cursor.fetchall():
             key = (int(row.object_id), int(row.index_id))
             indexes[key].append(str(row.column_name))
@@ -230,10 +230,11 @@ def _constraints(conn: Any, tables: dict[str, Table]) -> None:
                 bool(row.is_primary_key),
                 bool(row.is_unique),
                 bool(row.has_filter),
+                row.filter_definition,
             )
     for key, columns in indexes.items():
         object_id, _index_id = key
-        name, is_primary, is_unique, has_filter = metadata[key]
+        name, is_primary, is_unique, has_filter, filter_definition = metadata[key]
         table = object_ids.get(object_id)
         if table is None:
             continue
@@ -244,11 +245,15 @@ def _constraints(conn: Any, tables: dict[str, Table]) -> None:
                     table.column(column_name).nullable = False
                 except KeyError:
                     pass
-        elif is_unique and not has_filter:
+        elif is_unique:
+            predicate = None
+            if has_filter and filter_definition:
+                predicate = strip_check_definition(str(filter_definition))
             table.uniques.append(
                 UniqueConstraint(
                     name=name,
                     columns=columns,
+                    predicate=predicate,
                     provenance=Provenance("catalog", "sys.indexes", "unique"),
                 )
             )

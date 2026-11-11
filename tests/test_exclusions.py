@@ -17,6 +17,7 @@ from pgproof.application.verify import VerifyDataset, VerifyRequest
 from pgproof.core.exclusions import (
     build_exclusion_specs,
     parse_exclusion_definition,
+    predicate_columns,
     predicate_matches,
     ranges_overlap,
 )
@@ -55,6 +56,13 @@ def test_predicate_matches_simple_boolean_and_comparison() -> None:
     assert predicate_matches(
         "(active AND kind = 'paid')", {"active": False, "kind": "paid"}
     ) is False
+
+
+def test_predicate_matches_sqlserver_brackets() -> None:
+    assert predicate_matches("([active]=(1))", {"active": True}) is True
+    assert predicate_matches("([active]=(1))", {"active": False}) is False
+    assert predicate_matches("(status = 'paid'::text)", {"status": "paid"}) is True
+    assert predicate_columns("([active]=(1))") == {"active"}
 
 
 def test_ranges_overlap() -> None:

@@ -377,3 +377,77 @@ def test_sqlserver_range_partition_introspection_and_generation() -> None:
         verify_connection.close()
 
     assert report.verdict == "PASS"
+
+
+def test_sqlserver_filtered_unique_index() -> None:
+    assert MSSQL_DSN
+    connection = connect(MSSQL_DSN)
+    try:
+        with _cursor(connection) as cursor:
+            cursor.execute(
+                """
+                SET QUOTED_IDENTIFIER ON;
+                IF OBJECT_ID('pgproof_filtered.users','U') IS NOT NULL
+                    DROP TABLE pgproof_filtered.users;
+                IF SCHEMA_ID('pgproof_filtered') IS NULL
+                    EXEC('CREATE SCHEMA pgproof_filtered');
+                CREATE TABLE pgproof_filtered.users (
+                    id int IDENTITY(1,1) NOT NULL
+                        CONSTRAINT filtered_pk PRIMARY KEY,
+                    seat int NOT NULL
+                        CONSTRAINT filtered_seat_range
+                        CHECK ([seat] >= 1 AND [seat] <= 20),
+                    active bit NOT NULL
+                );
+                CREATE UNIQUE INDEX uq_active_seat
+                    ON pgproof_filtered.users(seat) WHERE active = 1;
+                """
+            )
+        connection.commit()
+        catalog = filter_catalog(
+            introspect(connection), schemas=["pgproof_filtered"]
+        )
+    finally:
+        connection.close()
+
+    table = catalog.table("pgproof_filtered.users")
+    assert table.uniques[0].predicate is not None
+
+    connection = connect(MSSQL_DSN)
+    writer = SqlServerRowWriter(connection)
+    try:
+        generated = GenerateDataset(catalog, writer, rows=20, seed=3).execute()
+    finally:
+        writer.close()
+
+    verify_connection = connect(MSSQL_DSN)
+    try:
+        runner = SqlServerQueryRunner(verify_connection)
+        report = VerifyDataset(
+            catalog,
+            runner,
+            YamlSpecLoader(),
+            SqlServerDialect(),
+            seed=3,
+        ).execute(
+            VerifyRequest(dataset_hash=generated.dataset_hash, plan=generated.plan)
+        )
+        with _cursor(verify_connection) as cursor:
+            cursor.execute(
+                "SET QUOTED_IDENTIFIER ON; "
+                "INSERT INTO pgproof_filtered.users (seat, active) "
+                "VALUES (1, 0), (1, 0);"
+            )
+        verify_connection.commit()
+        second = VerifyDataset(
+            catalog,
+            runner,
+            YamlSpecLoader(),
+            SqlServerDialect(),
+            seed=3,
+        ).execute(VerifyRequest(dataset_hash="n/a"))
+    finally:
+        verify_connection.close()
+
+    assert report.verdict == "PASS"
+    assert second.verdict == "PASS"

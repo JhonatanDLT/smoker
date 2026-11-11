@@ -25,6 +25,7 @@ from .exclusions import (
     next_range,
     next_value,
     predicate_columns,
+    predicate_matches,
     range_subtype,
 )
 from .invariants import LocalRules, infer_semantic, parse_local_rules
@@ -157,13 +158,18 @@ class Generator:
         self._rngs: dict[str, random.Random] = {}
         self._partition_counters: dict[str, int] = {}
         self._unique_columns: dict[str, set[str]] = {}
-        self._unique_keys: dict[str, list[tuple[str, ...]]] = {}
+        self._unique_keys: dict[str, list[tuple[tuple[str, ...], str | None]]] = {}
         self._seen_keys: dict[tuple[str, tuple[str, ...]], set[tuple]] = {}
         for table in catalog.tables:
             self._unique_columns[table.key] = {
-                unique.columns[0] for unique in table.uniques if len(unique.columns) == 1
+                unique.columns[0]
+                for unique in table.uniques
+                if len(unique.columns) == 1 and unique.predicate is None
             }
-            self._unique_keys[table.key] = [tuple(unique.columns) for unique in table.uniques]
+            self._unique_keys[table.key] = [
+                (tuple(unique.columns), unique.predicate)
+                for unique in table.uniques
+            ]
         self.scoped_fks: dict[tuple[str, str], tuple[tuple[str, ...], tuple[str, ...]]] = {}
         self.scope_specs: dict[str, list[tuple[tuple[str, ...], tuple[str, ...]]]] = {}
         self.scope_index: dict[
@@ -1073,10 +1079,12 @@ class Generator:
         names = [column.name for column in columns]
         values = dict(zip(names, row))
 
-        for key_columns in key_columns_list:
+        for key_columns, predicate in key_columns_list:
             if not key_columns:
                 continue
-            store_key = (table.key, key_columns)
+            if predicate and not predicate_matches(predicate, values):
+                continue
+            store_key = (table.key, key_columns, predicate)
             seen = self._seen_keys.setdefault(store_key, set())
             signature = tuple(_freeze(values.get(name)) for name in key_columns)
             if signature not in seen:
@@ -1084,28 +1092,42 @@ class Generator:
                 continue
 
             partition_columns = set(all_partition_columns(table))
+            blocked = set(partition_columns) | set(predicate_columns(predicate))
             candidates = [
                 name
                 for name in key_columns
-                if isinstance(values.get(name), str) and name not in partition_columns
+                if isinstance(values.get(name), str) and name not in blocked
             ]
             if not candidates:
                 candidates = [
                     name
                     for name in key_columns
-                    if name not in partition_columns
+                    if name not in blocked
                     and not any(name in fk.child_columns for fk in table.foreign_keys)
+                    and not table.column(name).generated
                 ]
             if not candidates:
                 continue
 
             target = candidates[0]
-            base = str(values.get(target) or "")
-            limit = table.column(target).max_length or 64
+            column = table.column(target)
             counter = 0
             while True:
-                suffix = f"-{index + 1}" if counter == 0 else f"-{index + 1}-{counter}"
-                candidate = (base[: max(0, limit - len(suffix))] + suffix)[:limit]
+                if isinstance(values.get(target), str):
+                    base = str(values.get(target) or "")
+                    limit = column.max_length or 64
+                    suffix = (
+                        f"-{index + 1}" if counter == 0 else f"-{index + 1}-{counter}"
+                    )
+                    candidate = (
+                        base[: max(0, limit - len(suffix))] + suffix
+                    )[:limit]
+                else:
+                    candidate = next_value(
+                        column, values.get(target), index, counter, self.plan.seed
+                    )
+                    if candidate is None:
+                        break
                 signature = tuple(
                     _freeze(candidate if name == target else values.get(name))
                     for name in key_columns
@@ -1113,6 +1135,8 @@ class Generator:
                 if signature not in seen or counter > 100:
                     break
                 counter += 1
+            if candidate is None:
+                continue
             values[target] = candidate
             seen.add(signature)
 

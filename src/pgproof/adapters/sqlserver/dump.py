@@ -509,13 +509,17 @@ class SqlServerDumpLoader:
             else:
                 columns = []
                 break
-        if not tree.args.get("unique") or where is not None or not columns:
+        if not tree.args.get("unique") or not columns:
             self._store_object("index", statement)
             return
+        predicate = (
+            where.this.sql(dialect="tsql") if where is not None else None
+        )
         table.uniques.append(
             UniqueConstraint(
                 name=index.name or f"{table.name}_{columns[0]}_key",
                 columns=columns,
+                predicate=predicate,
                 provenance=self._prov(statement, "unique_index"),
             )
         )

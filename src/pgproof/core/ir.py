@@ -185,6 +185,7 @@ class ExclusionConstraint:
 class UniqueConstraint:
     name: str
     columns: list[str]
+    predicate: str | None = None
     provenance: Provenance | None = None
 
 

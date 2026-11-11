@@ -75,15 +75,18 @@ class PostgresDialect:
             f"WHERE {name} IS NOT NULL AND {name}::text NOT IN ({values})"
         )
 
-    def unique_sql(self, table: Table, columns: list[str]) -> str:
+    def unique_sql(
+        self, table: Table, columns: list[str], predicate: str | None = None
+    ) -> str:
         qualified = self.quote_qualified(table.schema, table.name)
         column_list = ", ".join(self.quote_ident(name) for name in columns)
         not_null = " AND ".join(
             f"{self.quote_ident(name)} IS NOT NULL" for name in columns
         )
+        where = f"{not_null} AND ({predicate})" if predicate else not_null
         return (
             f"SELECT {column_list}, count(*) AS duplicates FROM {qualified} "
-            f"WHERE {not_null} GROUP BY {column_list} HAVING count(*) > 1"
+            f"WHERE {where} GROUP BY {column_list} HAVING count(*) > 1"
         )
 
     def foreign_key_sql(self, table: Table, fk: ForeignKey) -> str:

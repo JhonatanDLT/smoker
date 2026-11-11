@@ -168,14 +168,13 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
   generator samples inside the boundary range; SQL Server routes the rows.
 - Temporal tables: system-period columns are marked non-writable; history table
   generation is not implemented.
-- Filtered unique indexes are not treated as global unique constraints.
+- Filtered unique indexes are modeled as `UniqueConstraint.predicate`; the generator enforces them only inside the predicate and the verifier uses the filtered scope.
 - `TRUNCATE` with foreign keys falls back to FK-ordered `DELETE`.
 - `IDENTITY` values are inserted with `SET IDENTITY_INSERT`; sequences are
   reseeded with `DBCC CHECKIDENT` in SQL scripts.
 - SQL Server `datetime2`/`datetimeoffset` precision is set from the catalog;
   `rowversion` and computed columns are never written.
-- Azure SQL, `BULK INSERT`, filtered unique indexes and full temporal history are
-  not covered yet.
+- Azure SQL, `BULK INSERT` and full temporal history are not covered yet.
 
 ## Dialect limits
 

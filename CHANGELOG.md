@@ -4,6 +4,33 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [0.9.4] — 2026-11-11
+
+### Added
+
+- **Filtered unique indexes** are real constraints now.
+  - `UniqueConstraint.predicate` captures the SQL Server `WHERE` clause.
+  - Introspection and T-SQL dump loading preserve the filter.
+  - The generator enforces uniqueness only for rows that satisfy the predicate;
+    inactive rows may repeat the key.
+  - The model is dialect-neutral; PostgreSQL partial-index extraction can reuse
+    it later.
+  - `unique_sql` includes the predicate, so verification checks the filtered
+    scope rather than the whole table.
+- Bracket and cast normalization for predicates (`[active]=(1)`, `::text`).
+- Numeric unique-key collision adjustment, not only text suffixes.
+- Filtered unique coverage in the SQL Server integration suite, including
+  duplicate inactive rows.
+
+### Fixed
+
+- SQL Server check constraints with bracketed identifiers and parenthesized
+  bounds are now parsed into local generation rules.
+
+### Measured
+
+- 151 tests; all pass with PostgreSQL 16 and SQL Server 2022 Developer.
+
 ## [0.9.3] — 2026-11-11
 
 ### Added

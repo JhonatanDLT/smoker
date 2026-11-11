@@ -165,10 +165,16 @@ def build_exclusion_specs(table: Table) -> list[ExclusionSpec]:
     return specs
 
 
+def _normalize_expression(text: str) -> str:
+    text = re.sub(r"\[([^\]]+)\]", r"\1", text)
+    text = re.sub(r"::[A-Za-z_][A-Za-z0-9_ ]*", "", text)
+    return _strip_outer_parens(text)
+
+
 def predicate_columns(predicate: str | None) -> set[str]:
     if not predicate:
         return set()
-    cleaned = re.sub(r"'(?:[^']|'')*'", "''", predicate)
+    cleaned = re.sub(r"'(?:[^']|'')*'", "''", _normalize_expression(predicate))
     found: set[str] = set()
     for match in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)\b", cleaned):
         name = match.group(1)
@@ -227,7 +233,7 @@ def _split_top_level(text: str, separator: str) -> list[str]:
 
 
 def _literal(text: str) -> Any:
-    text = text.strip()
+    text = _strip_outer_parens(text.strip())
     upper = text.upper()
     if upper == "NULL":
         return None
@@ -286,7 +292,7 @@ def predicate_matches(predicate: str | None, values: dict[str, Any]) -> bool:
     """Evaluate the simple predicates used by exclusion constraints."""
     if not predicate:
         return True
-    text = _strip_outer_parens(predicate)
+    text = _normalize_expression(predicate)
     if not text:
         return True
 

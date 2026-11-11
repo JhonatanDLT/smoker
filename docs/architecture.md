@@ -480,14 +480,18 @@ The CLI exposes `--dialect`; unknown names fail with the available list. Only
 - `dialect.py`: `[brackets]`, `N'...'` literals, type mapping, `COUNT_BIG`,
   `TOP`, `WHERE NOT (...)`, scripts (`SET ANSI_NULLS`, `SET QUOTED_IDENTIFIER`,
   `SET XACT_ABORT`, `SET IDENTITY_INSERT`, `DBCC CHECKIDENT`, FK-ordered `DELETE`).
-- `introspect.py`: `sys.tables`, `sys.columns`, `sys.indexes`,
-  `sys.foreign_keys`, `sys.check_constraints`, `sys.triggers`,
-  `sys.sql_modules`, `sys.sequences`, partition schemes and procedures/functions.
+- `introspect.py`: `sys.tables`, `sys.columns`, `sys.indexes` (including
+  filtered unique indexes), `sys.foreign_keys`, `sys.check_constraints`,
+  `sys.triggers`, `sys.sql_modules`, `sys.sequences`, partition schemes and
+  procedures/functions.
 - `dump.py`: T-SQL batches (`GO`), `IDENTITY`, computed, `ROWVERSION`, checks,
   FKs, unique indexes, views, procedures, functions, triggers, sequences and
   user-defined types.
 - `query_runner.py`: counts, samples, untrusted constraints, table counts and
   deterministic digest.
+- Filtered unique indexes are constraints with a `predicate`; the generator
+  enforces them only for rows that satisfy it, and the verifier adds the
+  predicate to the uniqueness query.
 - `writer.py`: `pyodbc` `fast_executemany`, identity insert, reseed.
 - `profile.py`: `TOP`/`TABLESAMPLE` sampling and the canonical distribution
   profile.

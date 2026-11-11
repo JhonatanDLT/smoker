@@ -87,8 +87,7 @@ The order is deliberate: each phase is funded by the previous one.
 - T-SQL dump loader, profiler, stored procedures and range partitions.
 - Same invariant model, same report.
 - Verified against SQL Server 2022 Developer (dump → server → generate → verify).
-- Pending: Azure SQL, temporal history, filtered unique indexes, `BULK INSERT`
-  and the CI service container.
+- Pending: Azure SQL, temporal history and `BULK INSERT`.
 
 ## v0.10 — Other dialects (months 7–9)
 

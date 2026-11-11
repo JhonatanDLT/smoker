@@ -70,3 +70,29 @@ def test_derived_columns_and_orderings() -> None:
         assert amount == Decimal(quantity) * unit_price
         if ends_at is not None:
             assert ends_at > starts_at
+
+
+def test_filtered_unique_index_is_scoped_to_its_predicate() -> None:
+    from pgproof.adapters.sqlserver.dump import SqlServerDumpLoader
+    from pgproof.core.generator import Generator
+    from pgproof.core.planner import build_plan
+
+    catalog = SqlServerDumpLoader().load(
+        """
+        CREATE TABLE [dbo].[users] (
+            [id] int IDENTITY(1,1) PRIMARY KEY,
+            [seat] int NOT NULL,
+            [active] bit NOT NULL
+        );
+        GO
+        CREATE UNIQUE INDEX [uq_active_seat]
+            ON [dbo].[users]([seat]) WHERE [active] = 1;
+        """
+    )
+    table = catalog.table("dbo.users")
+    assert table.uniques[0].predicate is not None
+    generator = Generator(catalog, build_plan(catalog, rows=30, seed=17))
+    rows = list(generator.generate_validated(table))
+    active_seats = [row[1] for row in rows if row[2]]
+
+    assert len(set(active_seats)) == len(active_seats)

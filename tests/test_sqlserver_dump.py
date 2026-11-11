@@ -11,6 +11,7 @@ GO
 CREATE TABLE [shop].[customers] (
     [id] int IDENTITY(1,1) NOT NULL CONSTRAINT [customers_pk] PRIMARY KEY,
     [name] nvarchar(100) NOT NULL,
+    [code] int NULL,
     [active] bit NOT NULL DEFAULT 1,
     [created_at] datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME()
 );
@@ -27,6 +28,9 @@ CREATE TABLE [shop].[orders] (
 );
 GO
 CREATE UNIQUE INDEX [orders_customer_uq] ON [shop].[orders]([customer_id]);
+GO
+CREATE UNIQUE INDEX [customers_code_uq] ON [shop].[customers]([code])
+    WHERE [code] IS NOT NULL;
 GO
 CREATE VIEW [shop].[v_orders] AS
     SELECT [id], [total] FROM [shop].[orders];
@@ -57,7 +61,7 @@ GO
 
 
 def test_split_batches_on_go() -> None:
-    assert len(split_batches(DUMP)) == 9
+    assert len(split_batches(DUMP)) == 10
 
 
 def test_tables_columns_constraints_and_provenance() -> None:
@@ -76,6 +80,7 @@ def test_tables_columns_constraints_and_provenance() -> None:
     assert orders.foreign_keys[0].parent_table == "customers"
     assert orders.foreign_keys[0].child_columns == ["customer_id"]
     assert catalog.table("shop.orders").provenance is not None
+    assert customers.uniques[0].predicate == "NOT [code] IS NULL"
 
 
 def test_view_procedure_trigger_sequence_and_type() -> None:

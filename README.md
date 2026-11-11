@@ -75,7 +75,7 @@ open proof/report.html
 Expected output:
 
 ```
-pgproof 0.9.3 · 10 tables · 2,000 rows · seed 42
+pgproof 0.9.4 · 10 tables · 2,000 rows · seed 42
   generate billing.accounts        200 rows
   generate billing.plans           200 rows
   ...
@@ -222,10 +222,10 @@ pgproof verify --dialect sqlserver --dsn-env PGPROOF_MSSQL_DSN --out proof
 ```
 
 Live introspection, verification, generation, repair, T-SQL dump loading,
-profiling, stored procedures and range partitions are implemented and were
-verified against SQL Server 2022 Developer in a container. Azure SQL, temporal
-history and `BULK INSERT` are still pending. Integration tests are gated by
-`PGPROOF_MSSQL_DSN`.
+profiling, stored procedures, range partitions and filtered unique indexes are
+implemented and were verified against SQL Server 2022 Developer in a container.
+Azure SQL, temporal history and `BULK INSERT` are still pending. Integration
+tests are gated by `PGPROOF_MSSQL_DSN`.
 
 ## Repairs
 

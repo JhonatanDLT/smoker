@@ -1,7 +1,7 @@
 # Status
 
 **Date:** 2026-11-11
-**Version:** 0.9.3
+**Version:** 0.9.4
 **State:** working v1 plus CI output, repair loop, distribution-aware
 generation, partitioned tables, offline schema dumps, segmentation rules, a
 dependency-safe creation order, SQL export, exclusion-aware generation, a
@@ -34,6 +34,7 @@ SQL Server 2022.
 | **T-SQL dump loader, profiler and range partitions** | ✅ |
 | **Stored procedures** with parameters, body and creation order | ✅ |
 | **T-SQL segmentation** (`IF ... THROW/RAISERROR`) | ✅ report-only |
+| **Filtered unique indexes** with predicate-aware generation/verification | ✅ |
 | **Dialect-aware invariant SQL, SQL export and report label** | ✅ |
 | **`--dialect` extension point** (PostgreSQL + SQL Server) | ✅ |
 | Invariants from NOT NULL, UNIQUE, PK, FK, CHECK, enums | ✅ |
@@ -119,12 +120,12 @@ SQL Server 2022.
   dump loader, profiler and range partitions are implemented and registered as
   `--dialect sqlserver`; integration tests run against SQL Server 2022
   Developer.
-- **148 tests passing** with both `PGPROOF_TEST_DSN` and `PGPROOF_MSSQL_DSN`:
+- **151 tests passing** with both `PGPROOF_TEST_DSN` and `PGPROOF_MSSQL_DSN`:
   PostgreSQL 16 plus SQL Server 2022 Developer in a container.
 - SQL Server integration covers source introspection, verification, generation,
   identity/computed/rowversion, `varbinary`/`uniqueidentifier`/`datetime2`,
-  stored procedures, range partitions, profiling and dump → server → generate →
-  verify.
+  stored procedures, range partitions, filtering unique indexes, profiling and
+  dump → server → generate → verify.
 - Same seed produces the same dataset hash every run.
 
 ## Documentation
@@ -199,9 +200,9 @@ cli ──► application ──► core (domain + ports)
 - No parallel verification yet.
 - Cross-table rules need an explicit `repair:` declaration.
 - SQL Server is experimental and verified against SQL Server 2022 Developer.
-  Dump loading, profiling and range partitions are implemented; Azure SQL,
-  temporal history generation, filtered unique indexes and `BULK INSERT` are
-  still pending.
+  Dump loading, profiling, range partitions, stored procedures and filtered
+  unique indexes are implemented; Azure SQL, temporal history generation and
+  `BULK INSERT` are still pending.
 - MySQL and Oracle adapters are not implemented yet; the dialect contract and
   registry are ready for them.
 - Static code analysis is a roadmap item.
@@ -210,8 +211,7 @@ See [`docs/limitations.md`](docs/limitations.md).
 
 ## Next tasks
 
-1. Azure SQL, temporal history, filtered unique indexes and `BULK INSERT` for
-   full SQL Server parity.
+1. Azure SQL, temporal history and `BULK INSERT` for full SQL Server parity.
 2. Column correlations and parallel verification.
 3. Publish to PyPI and the GitHub Marketplace; first design-partner pilot.
 
