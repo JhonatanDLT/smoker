@@ -37,6 +37,7 @@ class SqlServerConnection:
 
     def __init__(self, connection: Any) -> None:
         self.connection = connection
+        self._closed = False
 
     def __enter__(self) -> Self:
         return self
@@ -53,6 +54,9 @@ class SqlServerConnection:
         return getattr(self.connection, name)
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         self.connection.close()
 
 
@@ -432,8 +436,10 @@ def _objects(conn: Any, tables: dict[str, Table]) -> tuple[list[Function], list[
 
         cursor.execute(
             """
-            SELECT s.name AS schema_name, q.name, q.start_value, q.increment,
-                   q.minimum_value, q.maximum_value, q.is_cycling
+            SELECT s.name AS schema_name, q.name,
+                   CAST(q.start_value AS nvarchar(100)) AS start_value,
+                   CAST(q.increment AS nvarchar(100)) AS increment,
+                   q.is_cycling
             FROM sys.sequences q
             JOIN sys.schemas s ON s.schema_id = q.schema_id
             ORDER BY s.name, q.name

@@ -488,7 +488,8 @@ The CLI exposes `--dialect`; unknown names fail with the available list. Only
 - `writer.py`: `pyodbc` `fast_executemany`, identity insert, reseed.
 - `sql_executor.py`: repair statements.
 
-It is source-first. T-SQL dump loading and profiling raise a clear
+It is source-first and was verified against SQL Server 2022 Developer in a
+container. T-SQL dump loading and profiling raise a clear
 `NotImplementedError`. The driver is optional:
 
 ```bash

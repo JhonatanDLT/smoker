@@ -158,8 +158,9 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
   and repair are implemented; T-SQL dump loading and profiling are not.
 - Install the driver with `pip install "pgproof[sqlserver]"` and set
   `PGPROOF_MSSQL_DSN` (ODBC connection string).
-- Integration tests are gated by `PGPROOF_MSSQL_DSN`; they have not run in the
-  default CI environment.
+- Integration tests are gated by `PGPROOF_MSSQL_DSN`. They were verified against
+  SQL Server 2022 Developer in a Docker container, but are not yet part of the
+  default CI matrix.
 - `EXCLUDE` does not exist in SQL Server; the capability is false and the
   verifier reports it as unsupported when a catalog carries one.
 - Partition schemes/functions are stored as raw objects; the partition tree is

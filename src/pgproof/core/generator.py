@@ -672,7 +672,7 @@ class Generator:
         elif kind == DataKind.RANGE:
             value = self._range_literal(column, index)
         elif kind == DataKind.BYTEA:
-            value = "\\x" + b"pgproof".hex()
+            value = b"pgproof"
         elif kind == DataKind.INET:
             value = f"192.168.{rng.randint(0, 255)}.{rng.randint(1, 254)}"
         elif kind == DataKind.ARRAY:

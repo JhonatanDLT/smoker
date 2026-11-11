@@ -102,7 +102,12 @@ def test_scripts_use_tsql_constructs() -> None:
     catalog = make_catalog()
     table = catalog.table("dbo.accounts")
 
-    assert dialect.script_begin() == ["SET XACT_ABORT ON;", "BEGIN TRANSACTION;"]
+    assert dialect.script_begin() == [
+        "SET ANSI_NULLS ON;",
+        "SET QUOTED_IDENTIFIER ON;",
+        "SET XACT_ABORT ON;",
+        "BEGIN TRANSACTION;",
+    ]
     assert dialect.script_reset_sequences([table]) == []
     assert dialect.script_before_insert(table) == []
     assert dialect.script_after_insert(table) == []

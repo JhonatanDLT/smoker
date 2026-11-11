@@ -518,7 +518,7 @@ def generate_cmd(
     ),
 ) -> None:
     """Generate rows into the target database, or into a .sql file."""
-    source_dsn = _dsn(source, source_env) if schema_file is None else None
+    source_dsn = _dsn(source, source_env) if schema_file is None and catalog_path is None else None
     target_dsn = None
     if sql_out is None:
         target_dsn = _dsn(target, target_env)
@@ -660,7 +660,7 @@ def run_cmd(
     """Introspect, generate, verify and write a report."""
     adapter = _adapter(dialect)
     started = time.perf_counter()
-    source_dsn = _dsn(source, source_env) if schema_file is None else None
+    source_dsn = _dsn(source, source_env) if schema_file is None and catalog_path is None else None
     target_dsn = _dsn(target, target_env)
     if source_dsn is not None and source_dsn == target_dsn:
         typer.echo("warning: source and target are the same database", err=True)

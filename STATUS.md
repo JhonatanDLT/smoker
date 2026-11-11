@@ -1,13 +1,13 @@
 # Status
 
 **Date:** 2026-11-11
-**Version:** 0.9.0
+**Version:** 0.9.1
 **State:** working v1 plus CI output, repair loop, distribution-aware
 generation, partitioned tables, offline schema dumps, segmentation rules, a
 dependency-safe creation order, SQL export, exclusion-aware generation, a
-dialect layer and a source-first SQL Server adapter (experimental). Tested end
-to end against PostgreSQL 16; SQL Server integration is gated by
-`PGPROOF_MSSQL_DSN`.
+dialect layer and a source-first SQL Server adapter (experimental, verified
+against SQL Server 2022 Developer). Tested end to end against PostgreSQL 16 and
+SQL Server 2022.
 
 ---
 
@@ -30,7 +30,7 @@ to end against PostgreSQL 16; SQL Server integration is gated by
 | **Dependency-safe creation order** (`pgproof order`) | ✅ |
 | **Dialect layer** (`SqlDialect`, `Capabilities`, registry) | ✅ |
 | **`DatabaseAdapter` aggregate** (dialect + connection factories) | ✅ |
-| **SQL Server dialect, introspection, query runner and writer** (experimental) | ✅ |
+| **SQL Server dialect, introspection, query runner and writer** (experimental, verified) | ✅ |
 | **T-SQL dump loader and SQL Server profiler** | ❌ pending |
 | **Dialect-aware invariant SQL, SQL export and report label** | ✅ |
 | **`--dialect` extension point** (SQL Server adapter pending) | ✅ |
@@ -113,10 +113,13 @@ to end against PostgreSQL 16; SQL Server integration is gated by
 - **Dialect layer:** PostgreSQL invariant SQL moved out of the core; the
   dialect and architecture contract tests enforce the boundary.
 - **SQL Server:** T-SQL dialect, `sys.*` introspection, query runner and writer
-  are implemented and registered as `--dialect sqlserver`; 2 integration tests
-  are gated by `PGPROOF_MSSQL_DSN`.
-- **140 tests collected**; 138 pass locally and 2 SQL Server integration tests
-  skip without a DSN.
+  are implemented and registered as `--dialect sqlserver`; integration tests
+  run against SQL Server 2022 Developer.
+- **141 tests passing** with both `PGPROOF_TEST_DSN` and `PGPROOF_MSSQL_DSN`:
+  PostgreSQL 16 plus SQL Server 2022 Developer in a container.
+- SQL Server integration covers source introspection, verification, generation,
+  identity/computed/rowversion, `varbinary`/`uniqueidentifier`/`datetime2` and
+  SQL script export applied to the server.
 - Same seed produces the same dataset hash every run.
 
 ## Documentation
@@ -190,9 +193,9 @@ cli ──► application ──► core (domain + ports)
 - Distributions are per column; correlations are not modelled.
 - No parallel verification yet.
 - Cross-table rules need an explicit `repair:` declaration.
-- SQL Server is implemented source-first (experimental): T-SQL dump loading and
-  profiling are pending, and the integration suite must run against a real
-  SQL Server before calling it production-ready.
+- SQL Server is implemented source-first (experimental) and was verified against
+  SQL Server 2022 Developer. T-SQL dump loading, profiling and partition-tree
+  mapping are pending; it is not yet production-ready.
 - MySQL and Oracle adapters are not implemented yet; the dialect contract and
   registry are ready for them.
 - Static code analysis is a roadmap item.
@@ -201,8 +204,8 @@ See [`docs/limitations.md`](docs/limitations.md).
 
 ## Next tasks
 
-1. Run the SQL Server integration suite with `PGPROOF_MSSQL_DSN` and fix the
-   first real-instance findings.
+1. Add the SQL Server integration suite to CI (container + `PGPROOF_MSSQL_DSN`)
+   and keep it green.
 2. T-SQL dump loader (`GO`, `[brackets]`, `IDENTITY`, `MERGE`) and SQL Server
    profiler.
 3. Column correlations and parallel verification.

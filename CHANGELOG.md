@@ -4,6 +4,39 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [0.9.1] — 2026-11-11
+
+### Verified against a real SQL Server
+
+The adapter was exercised against **SQL Server 2022 Developer** in a Docker
+container (`mcr.microsoft.com/mssql/server:2022-latest`) on an x86_64 Colima VM.
+
+### Fixed
+
+- `SqlServerConnection.close()` is idempotent; closing a writer and then the
+  connection no longer raises.
+- `sys.sequences` `sql_variant` columns are cast to `nvarchar` before pyodbc
+  reads them; introspection no longer fails on a sequence.
+- `DBCC CHECKIDENT` is emitted as one batch with its `DECLARE`/`SELECT`; the
+  variable is no longer out of scope.
+- SQL scripts begin with `SET ANSI_NULLS ON` and `SET QUOTED_IDENTIFIER ON`, so
+  computed columns and filtered indexes accept `DELETE`/`INSERT`.
+- `DataKind.BYTEA` now generates `bytes` instead of a PostgreSQL `\x...`
+  string; SQL Server `varbinary` and PostgreSQL `bytea` both receive the right
+  value.
+- `generate`/`run` with `--catalog` no longer require a source DSN.
+
+### Added
+
+- Integration coverage for:
+  - source introspection and verification;
+  - identity + uniqueidentifier + datetime2 + varbinary + computed + rowversion;
+  - SQL script export applied to SQL Server and then verified.
+
+### Measured
+
+- 141 tests; all pass with `PGPROOF_TEST_DSN` and `PGPROOF_MSSQL_DSN` set.
+
 ## [0.9.0] — 2026-11-11
 
 ### Added

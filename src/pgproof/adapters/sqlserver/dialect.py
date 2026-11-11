@@ -170,7 +170,12 @@ class SqlServerDialect:
 
     # ------------------------------------------------------ SQL scripts
     def script_begin(self) -> list[str]:
-        return ["SET XACT_ABORT ON;", "BEGIN TRANSACTION;"]
+        return [
+            "SET ANSI_NULLS ON;",
+            "SET QUOTED_IDENTIFIER ON;",
+            "SET XACT_ABORT ON;",
+            "BEGIN TRANSACTION;",
+        ]
 
     def script_commit(self) -> list[str]:
         return ["COMMIT TRANSACTION;"]
@@ -229,11 +234,9 @@ class SqlServerDialect:
                 variable = f"@pgproof_reseed_{counter}"
                 counter += 1
                 name = self.quote_ident(column.name)
-                statements.append(f"DECLARE {variable} BIGINT;")
                 statements.append(
-                    f"SELECT {variable} = ISNULL(MAX({name}), 0) FROM {qualified};"
-                )
-                statements.append(
+                    f"DECLARE {variable} BIGINT; "
+                    f"SELECT {variable} = ISNULL(MAX({name}), 0) FROM {qualified}; "
                     f"DBCC CHECKIDENT (N'{relation}', RESEED, {variable});"
                 )
         return statements
