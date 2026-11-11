@@ -75,7 +75,7 @@ open proof/report.html
 Expected output:
 
 ```
-pgproof 0.9.4 · 10 tables · 2,000 rows · seed 42
+pgproof 0.9.5 · 10 tables · 2,000 rows · seed 42
   generate billing.accounts        200 rows
   generate billing.plans           200 rows
   ...
@@ -219,13 +219,17 @@ pip install "pgproof[sqlserver]"
 export PGPROOF_MSSQL_DSN="DRIVER={ODBC Driver 18 for SQL Server};SERVER=...;DATABASE=...;UID=...;PWD=..."
 pgproof introspect --dialect sqlserver --dsn-env PGPROOF_MSSQL_DSN -o catalog.json
 pgproof verify --dialect sqlserver --dsn-env PGPROOF_MSSQL_DSN --out proof
+pgproof verify --dialect azuresql --dsn-env PGPROOF_AZURE_DSN --out proof
+pgproof introspect --dialect sqlserver --databases app,audit --dsn-env PGPROOF_MSSQL_DSN
 ```
 
 Live introspection, verification, generation, repair, T-SQL dump loading,
-profiling, stored procedures, range partitions and filtered unique indexes are
-implemented and were verified against SQL Server 2022 Developer in a container.
-Azure SQL, temporal history and `BULK INSERT` are still pending. Integration
-tests are gated by `PGPROOF_MSSQL_DSN`.
+profiling, stored procedures, range partitions, filtered unique indexes and
+multi-database catalogs are implemented and were verified against SQL Server
+2022 Developer in a container. Azure SQL is available through
+`--dialect azuresql` (single database, transient retries) but has not been
+tested against a live Azure instance yet. Temporal history and `BULK INSERT`
+are still pending. Integration tests are gated by `PGPROOF_MSSQL_DSN`.
 
 ## Repairs
 

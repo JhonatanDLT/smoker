@@ -23,7 +23,7 @@ class DatabaseAdapter:
     dialect: SqlDialect
     ddl_loader: DdlLoader
     connect: Callable[[str], Any]
-    introspect: Callable[[Any], Catalog]
+    introspect: Callable[..., Catalog]
     writer: Callable[[Any], RowWriter]
     query_runner: Callable[[Any], QueryRunner]
     executor: Callable[[Any], SqlExecutor]

@@ -509,7 +509,27 @@ pgproof verify --dialect sqlserver --dsn-env PGPROOF_MSSQL_DSN
 `Capabilities` for SQL Server: `exclusion_constraints=False`,
 `native_ranges=False`, `native_enums=False`, `partition_model="scheme"`,
 `row_identity="pk"`, `bulk_method="batch"`, `filtered_indexes=True`,
-`temporal_tables=True`.
+`temporal_tables=True`, `cross_database=True`.
+
+### Multi-database SQL Server
+
+On-prem SQL Server can hold several databases. `--databases app,audit` (or
+`*`) builds one catalog whose table keys are `database.schema.table`.
+`Table.database`, `ForeignKey.child_database/parent_database`, `Function.database`
+and `SqlObject.database` carry the qualifier. The SQL Server dialect renders
+three-part names for invariants, the writer, query runner, profiler, SQL export
+and `DBCC CHECKIDENT`. Cross-database relationships inferred from `*_id` naming
+are generated through the normal FK pools.
+
+PostgreSQL is one database per connection; requesting `--databases` there fails
+explicitly.
+
+### Azure SQL
+
+`AzureSqlDialect` extends the SQL Server dialect with
+`cross_database=False`, `managed_service=True` and
+`bulk_insert_from_file=False`. It rejects `USE` and three-part names, retries
+transient connection SQLSTATES, and is selected with `--dialect azuresql`.
 
 ## Security
 

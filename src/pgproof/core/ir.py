@@ -123,13 +123,19 @@ class ForeignKey:
     on_delete: str | None = None
     inferred: bool = False
     provenance: Provenance | None = None
+    child_database: str | None = None
+    parent_database: str | None = None
 
     @property
     def parent_key(self) -> str:
+        if self.parent_database:
+            return f"{self.parent_database}.{self.parent_schema}.{self.parent_table}"
         return f"{self.parent_schema}.{self.parent_table}"
 
     @property
     def child_key(self) -> str:
+        if self.child_database:
+            return f"{self.child_database}.{self.child_schema}.{self.child_table}"
         return f"{self.child_schema}.{self.child_table}"
 
 
@@ -163,6 +169,7 @@ class SqlObject:
     definition: str
     provenance: Provenance
     depends_on: list[str] = field(default_factory=list)
+    database: str | None = None
 
 
 @dataclass
@@ -228,6 +235,13 @@ class Function:
     writes: list[str] = field(default_factory=list)
     reads: list[str] = field(default_factory=list)
     provenance: Provenance | None = None
+    database: str | None = None
+
+    @property
+    def key(self) -> str:
+        if self.database:
+            return f"{self.database}.{self.schema}.{self.name}"
+        return f"{self.schema}.{self.name}"
 
 
 @dataclass
@@ -289,9 +303,12 @@ class Table:
     partition_key: list[str] = field(default_factory=list)
     partitions: list[Partition] = field(default_factory=list)
     provenance: Provenance | None = None
+    database: str | None = None
 
     @property
     def key(self) -> str:
+        if self.database:
+            return f"{self.database}.{self.schema}.{self.name}"
         return f"{self.schema}.{self.name}"
 
     @property
@@ -324,6 +341,7 @@ class Catalog:
     functions: list[Function] = field(default_factory=list)
     objects: list[SqlObject] = field(default_factory=list)
     rules: list[RuleCandidate] = field(default_factory=list)
+    databases: list[str] = field(default_factory=list)
 
     def table(self, key: str) -> Table:
         for table in self.tables:
@@ -420,6 +438,7 @@ class Catalog:
                     partition_key=raw.get("partition_key", []),
                     partitions=partitions,
                     provenance=_provenance(raw.get("provenance")),
+                    database=raw.get("database"),
                 )
             )
             _restore_partition_values(tables[-1])
@@ -445,9 +464,11 @@ class Catalog:
                     definition=obj.get("definition", ""),
                     provenance=_provenance(obj.get("provenance")) or Provenance("dump", ""),
                     depends_on=list(obj.get("depends_on", [])),
+                    database=obj.get("database"),
                 )
                 for obj in data.get("objects", [])
             ],
+            databases=list(data.get("databases", [])),
             rules=[
                 RuleCandidate(
                     id=rule.get("id", ""),
@@ -560,6 +581,16 @@ def all_partition_columns(table: Table) -> list[str]:
 
     walk(table.partitions)
     return columns
+
+
+def split_table_key(key: str) -> tuple[str | None, str, str]:
+    """Split ``database.schema.table``, ``schema.table`` or ``table``."""
+    parts = key.split(".")
+    if len(parts) >= 3:
+        return parts[-3], parts[-2], parts[-1]
+    if len(parts) == 2:
+        return None, parts[0], parts[1]
+    return None, "public", parts[0]
 
 
 def quote_ident(name: str) -> str:

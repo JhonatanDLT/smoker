@@ -18,6 +18,8 @@ from .postgres.profile import profile_catalog
 from .postgres.query_runner import PostgresQueryRunner
 from .postgres.sql_executor import PostgresSqlExecutor
 from .postgres.writer import PostgresRowWriter
+from .sqlserver.azure import AzureSqlDialect
+from .sqlserver.azure import connect as azure_connect
 from .sqlserver.dialect import SqlServerDialect
 from .sqlserver.dump import SqlServerDumpLoader
 from .sqlserver.introspect import connect as sqlserver_connect
@@ -28,13 +30,22 @@ from .sqlserver.sql_executor import SqlServerSqlExecutor
 from .sqlserver.writer import SqlServerRowWriter
 
 
+def _postgres_introspect(connection, databases=None):
+    if databases:
+        raise ValueError(
+            "PostgreSQL does not support multiple databases in one catalog; "
+            "one connection is one database"
+        )
+    return introspect(connection)
+
+
 def _postgres_adapter() -> DatabaseAdapter:
     return DatabaseAdapter(
         name="postgres",
         dialect=PostgresDialect(),
         ddl_loader=DumpLoader(),
         connect=connect,
-        introspect=introspect,
+        introspect=_postgres_introspect,
         writer=PostgresRowWriter,
         query_runner=PostgresQueryRunner,
         executor=PostgresSqlExecutor,
@@ -56,9 +67,30 @@ def _sqlserver_adapter() -> DatabaseAdapter:
     )
 
 
+def _azure_introspect(connection, databases=None):
+    return sqlserver_introspect(
+        connection, databases=databases, dialect=AzureSqlDialect()
+    )
+
+
+def _azuresql_adapter() -> DatabaseAdapter:
+    return DatabaseAdapter(
+        name="azuresql",
+        dialect=AzureSqlDialect(),
+        ddl_loader=SqlServerDumpLoader(allow_cross_database=False),
+        connect=azure_connect,
+        introspect=_azure_introspect,
+        writer=SqlServerRowWriter,
+        query_runner=SqlServerQueryRunner,
+        executor=SqlServerSqlExecutor,
+        profiler=sqlserver_profile,
+    )
+
+
 _ADAPTERS: dict[str, Callable[[], DatabaseAdapter]] = {
     "postgres": _postgres_adapter,
     "sqlserver": _sqlserver_adapter,
+    "azuresql": _azuresql_adapter,
 }
 
 

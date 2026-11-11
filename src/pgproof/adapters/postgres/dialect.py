@@ -50,6 +50,14 @@ class PostgresDialect:
     def quote_qualified(self, schema: str, name: str) -> str:
         return quote_qualified(schema, name)
 
+    def quote_table_parts(
+        self, database: str | None, schema: str, name: str
+    ) -> str:
+        return quote_qualified(schema, name)
+
+    def quote_table(self, table: Table) -> str:
+        return quote_qualified(table.schema, table.name)
+
     def literal(self, value: Any) -> str:
         return sql_literal(value)
 

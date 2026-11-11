@@ -451,3 +451,96 @@ def test_sqlserver_filtered_unique_index() -> None:
 
     assert report.verdict == "PASS"
     assert second.verdict == "PASS"
+
+
+def test_sqlserver_multi_database_introspection_and_generation() -> None:
+    assert MSSQL_DSN
+    connection = connect(MSSQL_DSN)
+    try:
+        connection.connection.autocommit = True
+        with _cursor(connection) as cursor:
+            for name in ("pgproof_multi_a", "pgproof_multi_b"):
+                cursor.execute(
+                    f"IF DB_ID('{name}') IS NOT NULL BEGIN "
+                    f"ALTER DATABASE [{name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; "
+                    f"DROP DATABASE [{name}]; END"
+                )
+            cursor.execute("CREATE DATABASE pgproof_multi_a")
+            cursor.execute("CREATE DATABASE pgproof_multi_b")
+            cursor.execute(
+                "USE pgproof_multi_a; "
+                "CREATE TABLE dbo.users ("
+                "id int IDENTITY(1,1) NOT NULL CONSTRAINT multi_users_pk PRIMARY KEY, "
+                "name nvarchar(50) NOT NULL)"
+            )
+            cursor.execute(
+                "USE pgproof_multi_b; "
+                "CREATE TABLE dbo.orders ("
+                "id int IDENTITY(1,1) NOT NULL CONSTRAINT multi_orders_pk PRIMARY KEY, "
+                "user_id int NOT NULL, "
+                "amount decimal(10,2) NOT NULL "
+                "CONSTRAINT multi_amount CHECK (amount >= 0))"
+            )
+        connection.connection.autocommit = False
+        catalog = introspect(
+            connection, databases=["pgproof_multi_a", "pgproof_multi_b"]
+        )
+    finally:
+        connection.close()
+
+    assert catalog.databases == ["pgproof_multi_a", "pgproof_multi_b"]
+    users = catalog.table("pgproof_multi_a.dbo.users")
+    orders = catalog.table("pgproof_multi_b.dbo.orders")
+    assert users.database == "pgproof_multi_a"
+    assert orders.database == "pgproof_multi_b"
+    assert orders.foreign_keys[0].parent_key == "pgproof_multi_a.dbo.users"
+
+    connection = connect(MSSQL_DSN)
+    writer = SqlServerRowWriter(connection)
+    try:
+        generated = GenerateDataset(catalog, writer, rows=10, seed=5).execute()
+    finally:
+        writer.close()
+
+    verify_connection = connect(MSSQL_DSN)
+    try:
+        report = VerifyDataset(
+            catalog,
+            SqlServerQueryRunner(verify_connection),
+            YamlSpecLoader(),
+            SqlServerDialect(),
+            seed=5,
+        ).execute(
+            VerifyRequest(dataset_hash=generated.dataset_hash, plan=generated.plan)
+        )
+    finally:
+        verify_connection.close()
+
+    assert report.verdict == "PASS"
+
+
+def test_azure_dialect_single_database_mode() -> None:
+    assert MSSQL_DSN
+    from pgproof.adapters.sqlserver.azure import AzureSqlDialect
+
+    connection = connect(MSSQL_DSN)
+    try:
+        with _cursor(connection) as cursor:
+            cursor.execute("SELECT DB_NAME()")
+            current = str(cursor.fetchone()[0])
+        catalog = introspect(
+            connection, databases=[current], dialect=AzureSqlDialect()
+        )
+        assert catalog.databases == []
+        try:
+            introspect(
+                connection,
+                databases=[current, "tempdb"],
+                dialect=AzureSqlDialect(),
+            )
+        except ValueError as exc:
+            assert "multiple databases" in str(exc)
+        else:
+            raise AssertionError("Azure SQL accepted multiple databases")
+    finally:
+        connection.close()

@@ -26,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .graph import generation_order
-from .ir import Catalog, SqlObject
+from .ir import Catalog, SqlObject, split_table_key
 
 
 @dataclass
@@ -47,6 +47,8 @@ class CreationOrder:
 
 
 def _object_name(obj: SqlObject) -> str:
+    if obj.database and obj.schema and obj.name:
+        return f"{obj.database}.{obj.schema}.{obj.name}"
     if obj.schema and obj.name:
         return f"{obj.schema}.{obj.name}"
     return obj.name or "(anonymous)"
@@ -58,17 +60,21 @@ def _provenance(obj: object) -> str | None:
 
 
 def _resolve_table(catalog: Catalog, name: str, default_schema: str) -> str | None:
-    parts = name.split(".")
-    if len(parts) >= 2:
-        key = f"{parts[-2]}.{parts[-1]}"
+    database, schema, table = split_table_key(name)
+    if database:
+        key = f"{database}.{schema}.{table}"
         return key if key in catalog.table_keys else None
-    for key in (f"{default_schema}.{name}", f"public.{name}"):
+    if schema and schema != "public":
+        key = f"{schema}.{table}"
         if key in catalog.table_keys:
             return key
-    for key in catalog.table_keys:
-        if key.split(".")[-1] == name:
+    for key in (f"{default_schema}.{table}", f"public.{table}"):
+        if key in catalog.table_keys:
             return key
-    return None
+    matches = [
+        key for key in catalog.table_keys if key.split(".")[-1] == table
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _resolve_function(catalog: Catalog, name: str, default_schema: str) -> str | None:
@@ -181,7 +187,7 @@ def creation_order(catalog: Catalog) -> CreationOrder:
     )
 
     def routine_step(function) -> CreationStep:  # type: ignore[no-untyped-def]
-        name = f"{function.schema}.{function.name}"
+        name = function.key
         dependencies: list[str] = []
         for target in [*function.reads, *function.writes]:
             key = _resolve_table(catalog, target, function.schema)

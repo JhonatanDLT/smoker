@@ -40,6 +40,9 @@ class Capabilities:
     temporal_tables: bool = False
     bulk_method: str = "batch"  # copy | bulk_insert | batch
     sample_method: str = "limit"  # tablesample | limit | top
+    cross_database: bool = True
+    managed_service: bool = False
+    bulk_insert_from_file: bool = True
 
 
 @runtime_checkable
@@ -51,6 +54,12 @@ class SqlDialect(Protocol):
     def quote_ident(self, name: str) -> str: ...
 
     def quote_qualified(self, schema: str, name: str) -> str: ...
+
+    def quote_table_parts(
+        self, database: str | None, schema: str, name: str
+    ) -> str: ...
+
+    def quote_table(self, table: Table) -> str: ...
 
     def literal(self, value: Any) -> str: ...
 

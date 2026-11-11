@@ -41,7 +41,7 @@ class SqlServerRowWriter:
         columns = table.writable_columns
         if not columns:
             return 0
-        qualified = self.dialect.quote_qualified(table.schema, table.name)
+        qualified = self.dialect.quote_table(table)
         column_list = ", ".join(
             self.dialect.quote_ident(column.name) for column in columns
         )

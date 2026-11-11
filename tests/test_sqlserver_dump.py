@@ -154,3 +154,41 @@ def test_load_dump_cli_with_sqlserver_dialect(tmp_path) -> None:
     assert any(item["kind"] == "procedure" for item in payload["functions"])
     assert any(item["kind"] == "view" for item in payload["objects"])
     assert any(step["phase"] == "procedure" for step in payload["creation_order"]["steps"])
+
+
+def test_multi_database_dump_with_use_and_three_part_names() -> None:
+    dump = """
+    USE [db_a];
+    GO
+    CREATE TABLE [dbo].[users] (
+        [id] int IDENTITY PRIMARY KEY,
+        [name] nvarchar(50) NOT NULL
+    );
+    GO
+    USE [db_b];
+    GO
+    CREATE TABLE [dbo].[orders] (
+        [id] int IDENTITY PRIMARY KEY,
+        [user_id] int NOT NULL,
+        [amount] decimal(10,2) NOT NULL
+    );
+    GO
+    CREATE VIEW [db_b].[dbo].[v_orders] AS
+        SELECT o.[id], u.[name]
+        FROM [db_b].[dbo].[orders] o
+        JOIN [db_a].[dbo].[users] u ON u.[id] = o.[user_id];
+    GO
+    """
+    catalog = SqlServerDumpLoader().load(dump)
+
+    assert catalog.databases == ["db_a", "db_b"]
+    assert catalog.database == "multi"
+    users = catalog.table("db_a.dbo.users")
+    orders = catalog.table("db_b.dbo.orders")
+    assert users.database == "db_a"
+    assert orders.database == "db_b"
+    assert orders.foreign_keys[0].parent_key == "db_a.dbo.users"
+    assert orders.foreign_keys[0].inferred is True
+    view = next(obj for obj in catalog.objects if obj.kind == "view")
+    assert view.database == "db_b"
+    assert view.depends_on == ["db_b.dbo.orders", "db_a.dbo.users"]

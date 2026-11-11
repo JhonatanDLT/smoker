@@ -101,3 +101,56 @@ def test_sql_script_writer_uses_the_dialect(tmp_path: Path) -> None:
     assert "BEGIN;" in text
     assert 'INSERT INTO "public"."accounts" ("id", "email") VALUES' in text
     assert "COMMIT;" in text
+
+
+def test_multi_database_table_and_foreign_key_keys() -> None:
+    from pgproof.core.ir import ForeignKey, Table, split_table_key
+
+    table = Table(database="db_a", schema="dbo", name="users")
+    assert table.key == "db_a.dbo.users"
+    assert split_table_key(table.key) == ("db_a", "dbo", "users")
+    fk = ForeignKey(
+        name="fk",
+        child_database="db_b",
+        child_schema="dbo",
+        child_table="orders",
+        child_columns=["user_id"],
+        parent_database="db_a",
+        parent_schema="dbo",
+        parent_table="users",
+        parent_columns=["id"],
+    )
+    assert fk.parent_key == "db_a.dbo.users"
+    assert fk.child_key == "db_b.dbo.orders"
+
+
+def test_quote_table_in_postgres_and_sqlserver() -> None:
+    from pgproof.adapters.sqlserver.dialect import SqlServerDialect
+    from pgproof.core.ir import Table
+
+    table = Table(database="db_a", schema="dbo", name="users")
+    assert PostgresDialect().quote_table(table) == '"dbo"."users"'
+    assert SqlServerDialect().quote_table(table) == "[db_a].[dbo].[users]"
+
+
+def test_azure_dialect_rejects_cross_database() -> None:
+    from pgproof.adapters.sqlserver.azure import AzureSqlDialect
+    from pgproof.core.ir import Table
+
+    dialect = AzureSqlDialect()
+    assert dialect.name == "azuresql"
+    assert dialect.capabilities.cross_database is False
+    assert dialect.capabilities.managed_service is True
+    with pytest.raises(ValueError, match="cross-database"):
+        dialect.quote_table(
+            Table(database="db_a", schema="dbo", name="users")
+        )
+
+
+def test_azure_dump_loader_rejects_use() -> None:
+    from pgproof.adapters.sqlserver.dump import SqlServerDumpLoader
+
+    with pytest.raises(ValueError, match="USE"):
+        SqlServerDumpLoader(allow_cross_database=False).load(
+            "USE [db_a];\nGO\nCREATE TABLE [dbo].[t] ([id] int);"
+        )

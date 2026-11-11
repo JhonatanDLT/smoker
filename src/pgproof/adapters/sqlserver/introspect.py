@@ -120,7 +120,9 @@ def _column_row(
     )
 
 
-def _tables(conn: Any, dialect: SqlServerDialect) -> dict[str, Table]:
+def _tables(
+    conn: Any, dialect: SqlServerDialect, database: str | None = None
+) -> dict[str, Table]:
     tables: dict[str, Table] = {}
     with _cursor(conn) as cursor:
         cursor.execute(
@@ -159,6 +161,7 @@ def _tables(conn: Any, dialect: SqlServerDialect) -> dict[str, Table]:
                 schema=str(row.schema_name),
                 name=str(row.table_name),
                 provenance=Provenance("catalog", "sys.tables", "table"),
+                database=database,
             )
             by_object[int(row.object_id)] = table
             tables[key] = table
@@ -187,7 +190,7 @@ def _tables(conn: Any, dialect: SqlServerDialect) -> dict[str, Table]:
 
 
 def _constraints(conn: Any, tables: dict[str, Table]) -> None:
-    by_object = tables
+    by_object = {(table.schema, table.name): table for table in tables.values()}
     object_ids: dict[int, Table] = {}
     # Rebuild the object_id -> table map from the catalog order.
     with _cursor(conn) as cursor:
@@ -198,7 +201,7 @@ def _constraints(conn: Any, tables: dict[str, Table]) -> None:
             ") q"
         )
         for object_id, schema_name, table_name in cursor.fetchall():
-            table = by_object.get(f"{schema_name}.{table_name}")
+            table = by_object.get((str(schema_name), str(table_name)))
             if table is not None:
                 object_ids[int(object_id)] = table
 
@@ -336,6 +339,7 @@ def _constraints(conn: Any, tables: dict[str, Table]) -> None:
 
 def _partitions(conn: Any, tables: dict[str, Table]) -> None:
     by_object: dict[int, Table] = {}
+    by_name = {(table.schema, table.name): table for table in tables.values()}
     with _cursor(conn) as cursor:
         cursor.execute(
             "SELECT object_id, schema_name, table_name FROM ("
@@ -344,7 +348,7 @@ def _partitions(conn: Any, tables: dict[str, Table]) -> None:
             ") q"
         )
         for object_id, schema_name, table_name in cursor.fetchall():
-            table = tables.get(f"{schema_name}.{table_name}")
+            table = by_name.get((str(schema_name), str(table_name)))
             if table is not None:
                 by_object[int(object_id)] = table
 
@@ -496,7 +500,9 @@ def _triggers(conn: Any, tables: dict[str, Table]) -> None:
         )
 
 
-def _objects(conn: Any, tables: dict[str, Table]) -> tuple[list[Function], list[SqlObject]]:
+def _objects(
+    conn: Any, tables: dict[str, Table], database: str | None = None
+) -> tuple[list[Function], list[SqlObject]]:
     functions: list[Function] = []
     objects: list[SqlObject] = []
     with _cursor(conn) as cursor:
@@ -523,6 +529,7 @@ def _objects(conn: Any, tables: dict[str, Table]) -> tuple[list[Function], list[
                     kind="procedure" if str(row.type).strip() in {"P", "PC"} else "function",
                     language="tsql",
                     provenance=Provenance("catalog", "sys.objects", "function"),
+                    database=database,
                 )
             )
 
@@ -544,6 +551,7 @@ def _objects(conn: Any, tables: dict[str, Table]) -> tuple[list[Function], list[
                     name=str(row.name),
                     definition=str(row.definition or ""),
                     provenance=Provenance("catalog", "sys.views", "view"),
+                    database=database,
                 )
             )
 
@@ -569,6 +577,7 @@ def _objects(conn: Any, tables: dict[str, Table]) -> tuple[list[Function], list[
                         f"START WITH {row.start_value} INCREMENT BY {row.increment}"
                     ),
                     provenance=Provenance("catalog", "sys.sequences", "sequence"),
+                    database=database,
                 )
             )
 
@@ -595,9 +604,65 @@ def _objects(conn: Any, tables: dict[str, Table]) -> tuple[list[Function], list[
                     provenance=Provenance(
                         "catalog", "sys.partition_schemes", "partition_scheme"
                     ),
+                    database=database,
                 )
             )
     return functions, objects
+
+
+def _compatible(left: Column, right: Column) -> bool:
+    if left.data_kind == right.data_kind:
+        return True
+    integers = {DataKind.SMALLINT, DataKind.INT, DataKind.BIGINT}
+    if left.data_kind in integers and right.data_kind in integers:
+        return True
+    text = {DataKind.TEXT, DataKind.ENUM}
+    return bool(left.data_kind in text and right.data_kind in text)
+
+
+def _infer_relationships(tables: dict[str, Table]) -> None:
+    for table in tables.values():
+        for column in table.columns:
+            if not column.name.endswith("_id"):
+                continue
+            if any(column.name in fk.child_columns for fk in table.foreign_keys):
+                continue
+            base = column.name[: -len("_id")]
+            candidates = {base, f"{base}s", f"{base}es"}
+            if base.endswith("y"):
+                candidates.add(f"{base[:-1]}ies")
+            ordered = sorted(
+                tables.values(),
+                key=lambda item: (item.database != table.database, item.key),
+            )
+            for candidate in ordered:
+                if candidate.name not in candidates or len(candidate.primary_key) != 1:
+                    continue
+                parent_column = candidate.primary_key[0]
+                try:
+                    parent = candidate.column(parent_column)
+                except KeyError:
+                    continue
+                if not _compatible(column, parent):
+                    continue
+                table.foreign_keys.append(
+                    ForeignKey(
+                        name=f"{table.name}_{column.name}_fkey",
+                        child_schema=table.schema,
+                        child_table=table.name,
+                        child_columns=[column.name],
+                        parent_schema=candidate.schema,
+                        parent_table=candidate.name,
+                        parent_columns=[parent_column],
+                        inferred=True,
+                        provenance=Provenance(
+                            "inferred", "naming", f"{table.key}.{column.name}"
+                        ),
+                        child_database=table.database,
+                        parent_database=candidate.database,
+                    )
+                )
+                break
 
 
 def _negate_tsql(condition: str) -> str | None:
@@ -706,32 +771,89 @@ def _analyze_triggers(tables: dict[str, Table]) -> list[RuleCandidate]:
     return rules
 
 
-def introspect(conn: Any) -> Catalog:
-    dialect = SqlServerDialect()
+def _user_databases(conn: Any) -> list[str]:
+    with _cursor(conn) as cursor:
+        cursor.execute(
+            "SELECT name FROM sys.databases "
+            "WHERE database_id > 4 AND state = 0 ORDER BY name"
+        )
+        return [str(row[0]) for row in cursor.fetchall()]
+
+
+def introspect(
+    conn: Any,
+    databases: list[str] | None = None,
+    dialect: SqlServerDialect | None = None,
+) -> Catalog:
+    active = dialect or SqlServerDialect()
     with _cursor(conn) as cursor:
         cursor.execute(
             "SELECT DB_NAME() AS database_name, "
             "CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128)) AS version"
         )
         row = cursor.fetchone()
-        database = str(row.database_name) if row else ""
+        current = str(row.database_name) if row else ""
         version = str(row.version) if row and row.version else ""
 
-    tables = _tables(conn, dialect)
-    _constraints(conn, tables)
-    _partitions(conn, tables)
-    _triggers(conn, tables)
-    functions, objects = _objects(conn, tables)
+    requested = databases
+    if requested and requested[0] in {"*", "all"}:
+        requested = _user_databases(conn)
+    if requested and len(requested) > 1 and not active.capabilities.cross_database:
+        raise ValueError(
+            "this dialect does not support multiple databases in one catalog"
+        )
+
+    tables: dict[str, Table] = {}
+    functions: list[Function] = []
+    objects: list[SqlObject] = []
+    selected = requested or [current]
+    multi = requested is not None and active.capabilities.cross_database
+    if not active.capabilities.cross_database:
+        if len(selected) > 1:
+            raise ValueError(
+                "this dialect does not support multiple databases in one catalog"
+            )
+        if selected[0] != current:
+            raise ValueError(
+                "this dialect is connected to one database; "
+                f"requested {selected[0]!r}, connected to {current!r}"
+            )
+    try:
+        for database_name in selected:
+            if active.capabilities.cross_database:
+                with _cursor(conn) as cursor:
+                    cursor.execute(f"USE [{database_name}]")
+            database = database_name if multi else None
+            db_tables = _tables(conn, active, database=database)
+            _constraints(conn, db_tables)
+            _partitions(conn, db_tables)
+            _triggers(conn, db_tables)
+            db_functions, db_objects = _objects(
+                conn, db_tables, database=database
+            )
+            tables.update(db_tables)
+            functions.extend(db_functions)
+            objects.extend(db_objects)
+    finally:
+        if requested and current and active.capabilities.cross_database:
+            try:
+                with _cursor(conn) as cursor:
+                    cursor.execute(f"USE [{current}]")
+            except Exception as exc:  # noqa: BLE001 - restore is best effort
+                logger.debug("could not restore database context: %s", exc)
+
+    _infer_relationships(tables)
     rules = _analyze_functions(functions)
     rules.extend(_analyze_triggers(tables))
     return Catalog(
-        database=database,
+        database=current,
         server_version=version,
         tables=sorted(tables.values(), key=lambda table: table.key),
         schemas=sorted({table.schema for table in tables.values()}),
         functions=functions,
         objects=objects,
         rules=rules,
+        databases=sorted(selected) if multi else [],
     )
 
 

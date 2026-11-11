@@ -18,8 +18,17 @@ def split_patterns(value: str | None) -> list[str]:
     return [part.strip() for part in value.split(",") if part.strip()]
 
 
-def _matches(pattern: str, schema: str, name: str) -> bool:
-    return fnmatch(f"{schema}.{name}", pattern) or fnmatch(name, pattern)
+def _matches(
+    pattern: str, database: str | None, schema: str, name: str
+) -> bool:
+    qualified = f"{schema}.{name}"
+    if database:
+        qualified = f"{database}.{qualified}"
+    return (
+        fnmatch(qualified, pattern)
+        or fnmatch(f"{schema}.{name}", pattern)
+        or fnmatch(name, pattern)
+    )
 
 
 def filter_catalog(
@@ -36,9 +45,15 @@ def filter_catalog(
     for table in catalog.tables:
         if schema_set and table.schema not in schema_set:
             continue
-        if include and not any(_matches(pattern, table.schema, table.name) for pattern in include):
+        if include and not any(
+            _matches(pattern, table.database, table.schema, table.name)
+            for pattern in include
+        ):
             continue
-        if any(_matches(pattern, table.schema, table.name) for pattern in exclude):
+        if any(
+            _matches(pattern, table.database, table.schema, table.name)
+            for pattern in exclude
+        ):
             continue
         tables.append(table)
 
@@ -50,4 +65,5 @@ def filter_catalog(
         functions=catalog.functions,
         objects=catalog.objects,
         rules=catalog.rules,
+        databases=catalog.databases,
     )

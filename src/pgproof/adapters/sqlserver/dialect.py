@@ -45,6 +45,23 @@ class SqlServerDialect:
     def quote_qualified(self, schema: str, name: str) -> str:
         return f"{self.quote_ident(schema)}.{self.quote_ident(name)}"
 
+    def quote_table_parts(
+        self, database: str | None, schema: str, name: str
+    ) -> str:
+        if database:
+            if not self.capabilities.cross_database:
+                raise ValueError(
+                    "cross-database references are not supported by this dialect"
+                )
+            return (
+                f"{self.quote_ident(database)}."
+                f"{self.quote_ident(schema)}.{self.quote_ident(name)}"
+            )
+        return f"{self.quote_ident(schema)}.{self.quote_ident(name)}"
+
+    def quote_table(self, table: Table) -> str:
+        return self.quote_table_parts(table.database, table.schema, table.name)
+
     def literal(self, value: Any) -> str:
         if value is None:
             return "NULL"
@@ -104,14 +121,14 @@ class SqlServerDialect:
 
     # ------------------------------------------------------ invariant SQL
     def not_null_sql(self, table: Table, column: Column) -> str:
-        qualified = self.quote_qualified(table.schema, table.name)
+        qualified = self.quote_table(table)
         return (
             f"SELECT 1 AS violation FROM {qualified} "
             f"WHERE {self.quote_ident(column.name)} IS NULL"
         )
 
     def enum_sql(self, table: Table, column: Column) -> str:
-        qualified = self.quote_qualified(table.schema, table.name)
+        qualified = self.quote_table(table)
         name = self.quote_ident(column.name)
         values = ", ".join(self.literal(value) for value in column.enum_values)
         return (
@@ -122,7 +139,7 @@ class SqlServerDialect:
     def unique_sql(
         self, table: Table, columns: list[str], predicate: str | None = None
     ) -> str:
-        qualified = self.quote_qualified(table.schema, table.name)
+        qualified = self.quote_table(table)
         column_list = ", ".join(self.quote_ident(name) for name in columns)
         not_null = " AND ".join(
             f"{self.quote_ident(name)} IS NOT NULL" for name in columns
@@ -134,7 +151,7 @@ class SqlServerDialect:
         )
 
     def foreign_key_sql(self, table: Table, fk: ForeignKey) -> str:
-        qualified = self.quote_qualified(table.schema, table.name)
+        qualified = self.quote_table(table)
         child_columns = ", ".join(
             self.quote_ident(name) for name in fk.child_columns
         )
@@ -145,7 +162,9 @@ class SqlServerDialect:
             f"p.{self.quote_ident(parent)} = c.{self.quote_ident(child)}"
             for child, parent in zip(fk.child_columns, fk.parent_columns)
         )
-        parent = self.quote_qualified(fk.parent_schema, fk.parent_table)
+        parent = self.quote_table_parts(
+            fk.parent_database, fk.parent_schema, fk.parent_table
+        )
         return (
             f"SELECT {child_columns} FROM {qualified} c "
             f"WHERE {conditions} AND NOT EXISTS ("
@@ -153,7 +172,7 @@ class SqlServerDialect:
         )
 
     def check_sql(self, table: Table, predicate: str) -> str:
-        qualified = self.quote_qualified(table.schema, table.name)
+        qualified = self.quote_table(table)
         return (
             f"SELECT 1 AS violation FROM {qualified} "
             f"WHERE NOT ({predicate})"
@@ -197,11 +216,11 @@ class SqlServerDialect:
         )
         if not has_edges:
             return [
-                f"TRUNCATE TABLE {self.quote_qualified(table.schema, table.name)};"
+                f"TRUNCATE TABLE {self.quote_table(table)};"
                 for table in tables
             ]
         return [
-            f"DELETE FROM {self.quote_qualified(table.schema, table.name)};"
+            f"DELETE FROM {self.quote_table(table)};"
             for table in self._delete_order(tables)
         ]
 
@@ -229,7 +248,7 @@ class SqlServerDialect:
         statements: list[str] = []
         counter = 0
         for table in tables:
-            qualified = self.quote_qualified(table.schema, table.name)
+            qualified = self.quote_table(table)
             relation = qualified.replace("'", "''")
             for column in table.columns:
                 if not column.identity:
@@ -247,13 +266,13 @@ class SqlServerDialect:
     def script_before_insert(self, table: Table) -> list[str]:
         if not any(column.identity for column in table.columns):
             return []
-        qualified = self.quote_qualified(table.schema, table.name)
+        qualified = self.quote_table(table)
         return [f"SET IDENTITY_INSERT {qualified} ON;"]
 
     def script_after_insert(self, table: Table) -> list[str]:
         if not any(column.identity for column in table.columns):
             return []
-        qualified = self.quote_qualified(table.schema, table.name)
+        qualified = self.quote_table(table)
         return [f"SET IDENTITY_INSERT {qualified} OFF;"]
 
 

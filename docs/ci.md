@@ -37,7 +37,7 @@ The repository ships a composite action at the root.
 
 `version: source` installs the checkout that contains the action. That is the
 right value while pgproof is not published to PyPI. Once it is, set
-`version: 0.9.4`.
+`version: 0.9.5`.
 
 ### Outputs
 
@@ -115,7 +115,8 @@ env:
 
 Install `msodbcsql18` from the Microsoft Ubuntu repository and run
 `pip install -e ".[dev,sqlserver]"`. Then `pytest -m integration` exercises
-both dialects.
+both dialects. Azure SQL requires a real managed instance and is not part of
+the default CI matrix; run a manual smoke test with `PGPROOF_AZURE_DSN`.
 
 ## GitLab CI
 

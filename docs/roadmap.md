@@ -84,10 +84,12 @@ The order is deliberate: each phase is funded by the previous one.
 - `sys.*` introspection, T-SQL dialect, query runner, writer and executor.
 - SQL Server as a **source** for migration validation.
 - SQL Server as a **target** for generation and repair.
-- T-SQL dump loader, profiler, stored procedures and range partitions.
+- T-SQL dump loader, profiler, stored procedures, range partitions and filtered
+  unique indexes.
+- Multi-database catalogs and Azure SQL dialect.
 - Same invariant model, same report.
 - Verified against SQL Server 2022 Developer (dump → server → generate → verify).
-- Pending: Azure SQL, temporal history and `BULK INSERT`.
+- Pending: a live Azure SQL smoke test, temporal history and `BULK INSERT`.
 
 ## v0.10 — Other dialects (months 7–9)
 

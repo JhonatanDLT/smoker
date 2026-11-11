@@ -18,6 +18,7 @@ Everything about pgproof, from the first command to the business model.
 | Document | What it answers |
 |---|---|
 | [CI integration](ci.md) | GitHub Actions, GitLab, Jenkins |
+| [Azure SQL](azure-sql.md) | Managed SQL Server, Entra ID, cross-database limits |
 | [Security](security.md) | DSNs, PII, profiles, offline use |
 | [Limitations](limitations.md) | What is not verified, by design |
 | [Architecture](architecture.md) | Layers, ports, SOLID mapping |

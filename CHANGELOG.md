@@ -4,6 +4,37 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [0.9.5] — 2026-11-11
+
+### Added
+
+- **Multi-database SQL Server catalogs.** `--databases app,audit` (or `*`)
+  builds one catalog with `database.schema.table` keys. Tables, foreign keys,
+  functions, views and inferred relationships carry the database qualifier.
+- **Three-part SQL rendering** for SQL Server invariants, writer, query runner,
+  profiler, SQL export, sequence reseed and `IDENTITY_INSERT`.
+- **Cross-database inference** from `*_id` naming; the generator produces
+  coherent values across databases on on-prem SQL Server.
+- **Azure SQL dialect** (`--dialect azuresql`):
+  - single database only,
+  - no `USE` or cross-database references,
+  - no local-file `BULK INSERT`,
+  - transient connection retries for serverless/failover SQLSTATES.
+- Azure SQL documentation (`docs/azure-sql.md`).
+- T-SQL dump loader handles `USE [db]`, three-part names and cross-database view
+  dependencies.
+
+### Changed
+
+- `Table`, `ForeignKey`, `Function` and `SqlObject` carry an optional
+  `database`; single-database catalogs keep their existing `schema.table` keys.
+- PostgreSQL multi-database requests fail explicitly, because one connection is
+  one database.
+
+### Measured
+
+- 158 tests; all pass with PostgreSQL 16 and SQL Server 2022 Developer.
+
 ## [0.9.4] — 2026-11-11
 
 ### Added

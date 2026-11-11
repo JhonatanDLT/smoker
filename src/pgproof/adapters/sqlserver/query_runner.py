@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from ...core.ir import Table
+from ...core.ir import Table, split_table_key
 from .dialect import SqlServerDialect
 from .introspect import _cursor
 from .serialization import text
@@ -77,8 +77,8 @@ class SqlServerQueryRunner:
         counts: dict[str, int] = {}
         with _cursor(self.connection) as cursor:
             for key in keys:
-                schema, name = key.split(".", 1)
-                qualified = self.dialect.quote_qualified(schema, name)
+                database, schema, name = split_table_key(key)
+                qualified = self.dialect.quote_table_parts(database, schema, name)
                 cursor.execute(f"SELECT COUNT_BIG(*) FROM {qualified}")
                 counts[key] = int(cursor.fetchone()[0])
         return counts
@@ -97,7 +97,7 @@ class SqlServerQueryRunner:
                 order_list = ", ".join(
                     self.dialect.quote_ident(name) for name in order_columns
                 )
-                qualified = self.dialect.quote_qualified(table.schema, table.name)
+                qualified = self.dialect.quote_table(table)
                 cursor.execute(
                     f"SELECT {column_list} FROM {qualified} ORDER BY {order_list}"
                 )

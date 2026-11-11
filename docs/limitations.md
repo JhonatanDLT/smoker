@@ -174,7 +174,13 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
   reseeded with `DBCC CHECKIDENT` in SQL scripts.
 - SQL Server `datetime2`/`datetimeoffset` precision is set from the catalog;
   `rowversion` and computed columns are never written.
-- Azure SQL, `BULK INSERT` and full temporal history are not covered yet.
+- Multi-database catalogs use `database.schema.table` keys; one connection must
+  have access to every database. Azure SQL rejects multiple databases and any
+  cross-database reference.
+- Azure SQL is implemented through the `azuresql` dialect (single database,
+  transient retries, no local-file `BULK INSERT`), but it has not been tested
+  against a live Azure instance yet.
+- `BULK INSERT` and full temporal history are not covered yet.
 
 ## Dialect limits
 

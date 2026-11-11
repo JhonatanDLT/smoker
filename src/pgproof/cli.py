@@ -121,15 +121,30 @@ def _ddl_loader(name: str) -> DdlLoader:
     return _adapter(name).ddl_loader
 
 
+def _parse_databases(raw: str | None) -> list[str] | None:
+    if not raw:
+        return None
+    values = [value.strip() for value in raw.split(",") if value.strip()]
+    return values or None
+
+
 def _introspect(
     adapter: DatabaseAdapter,
     dsn: str,
     schema: str | None = None,
     include: str | None = None,
     exclude: str | None = None,
+    databases: list[str] | None = None,
 ) -> Catalog:
     with _connect(adapter, dsn) as conn:
-        catalog = adapter.introspect(conn)
+        try:
+            catalog = (
+                adapter.introspect(conn, databases=databases)
+                if databases
+                else adapter.introspect(conn)
+            )
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc), param_hint="--databases") from exc
     catalog = _apply_filters(catalog, schema, include, exclude)
     semantic_for_catalog(catalog)
     return catalog
@@ -143,6 +158,7 @@ def _load_catalog(
     exclude: str | None = None,
     schema_file: Path | None = None,
     dialect: str = "postgres",
+    databases: list[str] | None = None,
 ) -> Catalog:
     adapter = _adapter(dialect)
     if path:
@@ -161,7 +177,7 @@ def _load_catalog(
         return catalog
     if dsn is None:
         raise typer.BadParameter("provide --dsn, --schema-file or --catalog")
-    return _introspect(adapter, dsn, schema, include, exclude)
+    return _introspect(adapter, dsn, schema, include, exclude, databases)
 
 
 def _load_profile(path: Path | None) -> Profile | None:
@@ -238,14 +254,17 @@ def introspect_cmd(
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
+    databases: str | None = typer.Option(
+        None, "--databases", help="Comma-separated databases or *"
+    ),
     out: Path = typer.Option(Path("catalog.json"), "--out", "-o"),
     dialect: str = typer.Option(
-        "postgres", "--dialect", help="Dialect: postgres (sqlserver planned)"
+        "postgres", "--dialect", help="Dialect: postgres, sqlserver or azuresql"
     ),
 ) -> None:
     """Read a catalog and save it as JSON."""
     adapter = _adapter(dialect)
-    catalog = _introspect(adapter, _dsn(dsn, dsn_env), schema, include, exclude)
+    catalog = _introspect(adapter, _dsn(dsn, dsn_env), schema, include, exclude, _parse_databases(databases))
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(catalog.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
     typer.echo(
@@ -262,7 +281,7 @@ def load_dump_cmd(
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
     dialect: str = typer.Option(
-        "postgres", "--dialect", help="Dialect of the dump: postgres (sqlserver planned)"
+        "postgres", "--dialect", help="Dialect of the dump: postgres or sqlserver"
     ),
 ) -> None:
     """Load a schema dump (.sql) and save the catalog as JSON."""
@@ -297,6 +316,9 @@ def order_cmd(
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
+    databases: str | None = typer.Option(
+        None, "--databases", help="Comma-separated databases or *"
+    ),
     schema_file: Path | None = typer.Option(
         None, "--schema-file", help="Load the catalog from a .sql dump"
     ),
@@ -307,7 +329,7 @@ def order_cmd(
         "text", "--format", help="text or json"
     ),
     dialect: str = typer.Option(
-        "postgres", "--dialect", help="Dialect: postgres (sqlserver planned)"
+        "postgres", "--dialect", help="Dialect: postgres, sqlserver or azuresql"
     ),
 ) -> None:
     """Show a dependency-safe creation and insertion order."""
@@ -319,6 +341,7 @@ def order_cmd(
         exclude,
         schema_file,
         dialect,
+        _parse_databases(databases),
     )
     order = creation_order(catalog)
     if output_format == "json":
@@ -353,6 +376,9 @@ def plan_cmd(
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
+    databases: str | None = typer.Option(
+        None, "--databases", help="Comma-separated databases or *"
+    ),
     schema_file: Path | None = typer.Option(
         None, "--schema-file", help="Load the catalog from a .sql dump"
     ),
@@ -361,7 +387,7 @@ def plan_cmd(
     table_rows: str | None = typer.Option(None, "--table-rows"),
     out: Path = typer.Option(Path("plan.json"), "--out", "-o"),
     dialect: str = typer.Option(
-        "postgres", "--dialect", help="Dialect: postgres (sqlserver planned)"
+        "postgres", "--dialect", help="Dialect: postgres, sqlserver or azuresql"
     ),
 ) -> None:
     """Build and print a generation plan without touching any data."""
@@ -373,6 +399,7 @@ def plan_cmd(
         exclude,
         schema_file,
         dialect,
+        _parse_databases(databases),
     )
     try:
         plan = build_plan(
@@ -407,12 +434,15 @@ def audit_cmd(
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
+    databases: str | None = typer.Option(
+        None, "--databases", help="Comma-separated databases or *"
+    ),
     schema_file: Path | None = typer.Option(
         None, "--schema-file", help="Load the catalog from a .sql dump"
     ),
     out: Path = typer.Option(Path("audit.md"), "--out", "-o"),
     dialect: str = typer.Option(
-        "postgres", "--dialect", help="Dialect: postgres (sqlserver planned)"
+        "postgres", "--dialect", help="Dialect: postgres, sqlserver or azuresql"
     ),
 ) -> None:
     """Produce a schema readiness audit without reading any data."""
@@ -424,6 +454,7 @@ def audit_cmd(
         exclude,
         schema_file,
         dialect,
+        _parse_databases(databases),
     )
     audit = AuditSchema(catalog, _dialect(dialect)).execute()
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -452,8 +483,11 @@ def profile_cmd(
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
+    databases: str | None = typer.Option(
+        None, "--databases", help="Comma-separated databases or *"
+    ),
     dialect: str = typer.Option(
-        "postgres", "--dialect", help="Dialect: postgres (sqlserver planned)"
+        "postgres", "--dialect", help="Dialect: postgres, sqlserver or azuresql"
     ),
 ) -> None:
     """Sample the source and save a profile for distribution-aware generation."""
@@ -464,7 +498,7 @@ def profile_cmd(
         return
     adapter = _adapter(dialect)
     dsn_value = _dsn(dsn, dsn_env)
-    catalog = _introspect(adapter, dsn_value, schema, include, exclude)
+    catalog = _introspect(adapter, dsn_value, schema, include, exclude, _parse_databases(databases))
     with _connect(adapter, dsn_value) as connection:
         try:
             profile = adapter.profile(
@@ -507,6 +541,9 @@ def generate_cmd(
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
+    databases: str | None = typer.Option(
+        None, "--databases", help="Comma-separated databases or *"
+    ),
     schema_file: Path | None = typer.Option(
         None, "--schema-file", help="Load the catalog from a .sql dump"
     ),
@@ -516,7 +553,7 @@ def generate_cmd(
         help="Write INSERT statements to this .sql file instead of a target database",
     ),
     dialect: str = typer.Option(
-        "postgres", "--dialect", help="Dialect: postgres (sqlserver planned)"
+        "postgres", "--dialect", help="Dialect: postgres, sqlserver or azuresql"
     ),
 ) -> None:
     """Generate rows into the target database, or into a .sql file."""
@@ -528,7 +565,8 @@ def generate_cmd(
             typer.echo("warning: source and target are the same database", err=True)
 
     catalog = _load_catalog(
-        catalog_path, source_dsn, schema, include, exclude, schema_file, dialect
+        catalog_path, source_dsn, schema, include, exclude, schema_file, dialect,
+        _parse_databases(databases),
     )
     adapter = _adapter(dialect)
     writer: Any
@@ -584,11 +622,14 @@ def verify_cmd(
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
+    databases: str | None = typer.Option(
+        None, "--databases", help="Comma-separated databases or *"
+    ),
     schema_file: Path | None = typer.Option(
         None, "--schema-file", help="Load the catalog from a .sql dump"
     ),
     dialect: str = typer.Option(
-        "postgres", "--dialect", help="Dialect: postgres (sqlserver planned)"
+        "postgres", "--dialect", help="Dialect: postgres, sqlserver or azuresql"
     ),
 ) -> None:
     """Verify every invariant against the target database."""
@@ -597,7 +638,8 @@ def verify_cmd(
     connection = _connect(adapter, target_dsn)
     try:
         catalog = _load_catalog(
-            catalog_path, target_dsn, schema, include, exclude, schema_file, dialect
+            catalog_path, target_dsn, schema, include, exclude, schema_file, dialect,
+            _parse_databases(databases),
         )
         use_case = VerifyDataset(
             catalog,
@@ -652,11 +694,14 @@ def run_cmd(
     schema: str | None = typer.Option(None, "--schema", help="Comma-separated schemas"),
     include: str | None = typer.Option(None, "--include", help="Comma-separated globs"),
     exclude: str | None = typer.Option(None, "--exclude", help="Comma-separated globs"),
+    databases: str | None = typer.Option(
+        None, "--databases", help="Comma-separated databases or *"
+    ),
     schema_file: Path | None = typer.Option(
         None, "--schema-file", help="Load the catalog from a .sql dump"
     ),
     dialect: str = typer.Option(
-        "postgres", "--dialect", help="Dialect: postgres (sqlserver planned)"
+        "postgres", "--dialect", help="Dialect: postgres, sqlserver or azuresql"
     ),
 ) -> None:
     """Introspect, generate, verify and write a report."""
@@ -668,7 +713,8 @@ def run_cmd(
         typer.echo("warning: source and target are the same database", err=True)
 
     catalog = _load_catalog(
-        catalog_path, source_dsn, schema, include, exclude, schema_file, dialect
+        catalog_path, source_dsn, schema, include, exclude, schema_file, dialect,
+        _parse_databases(databases),
     )
     out.mkdir(parents=True, exist_ok=True)
     (out / "catalog.json").write_text(

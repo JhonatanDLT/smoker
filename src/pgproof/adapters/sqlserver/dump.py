@@ -35,7 +35,7 @@ from .dialect import SqlServerDialect
 logger = logging.getLogger(__name__)
 
 _IDENT = r"(?:\[[^\]]+\]|[\w$]+)"
-_QUALIFIED = rf"{_IDENT}(?:\.{_IDENT})?"
+_QUALIFIED3 = rf"{_IDENT}(?:\.{_IDENT}){{0,2}}"
 _WS = r"\s+"
 _GO = re.compile(r"(?im)^\s*GO\s*$")
 
@@ -53,12 +53,6 @@ def _unquote(name: str) -> str:
         return name[1:-1].replace('""', '"')
     return name
 
-
-def _qualified(name: str, default_schema: str = "dbo") -> tuple[str, str]:
-    parts = re.findall(_IDENT, name)
-    if len(parts) >= 2:
-        return _unquote(parts[-2]), _unquote(parts[-1])
-    return default_schema, _unquote(parts[-1] if parts else name)
 
 
 def _split_top_level(text: str, separator: str = ",") -> list[str]:
@@ -111,7 +105,8 @@ def _compatible(left: Column, right: Column) -> bool:
 
 
 class SqlServerDumpLoader:
-    def __init__(self) -> None:
+    def __init__(self, allow_cross_database: bool = True) -> None:
+        self.allow_cross_database = allow_cross_database
         self.dialect = SqlServerDialect()
         self.tables: dict[str, Table] = {}
         self.functions: list[Function] = []
@@ -119,36 +114,48 @@ class SqlServerDumpLoader:
         self.trigger_specs: list[dict[str, Any]] = []
         self.rules: list[RuleCandidate] = []
         self.schemas: set[str] = {"dbo"}
-        self.search_path = "dbo"
+        self.current_database: str | None = None
 
     # ------------------------------------------------------------------ entry
     def load(self, sql: str) -> Catalog:
         for batch in split_batches(sql):
             try:
                 self._batch(batch)
+            except ValueError:
+                raise
             except Exception as exc:  # noqa: BLE001 - one bad batch must not drop the dump
                 logger.warning("skipping unparseable T-SQL batch: %s", exc)
         self._attach_triggers()
         self._infer_relationships()
         self._analyze_routines()
         self._extract_rules()
+        databases = sorted(
+            {
+                item.database
+                for item in [*self.tables.values(), *self.functions, *self.objects]
+                if item.database
+            }
+        )
         return Catalog(
-            database="dump",
+            database="multi" if len(databases) > 1 else (databases[0] if databases else "dump"),
             server_version="tsql",
             tables=sorted(self.tables.values(), key=lambda table: table.key),
             schemas=sorted({table.schema for table in self.tables.values()} | self.schemas),
             functions=self.functions,
             objects=self.objects,
             rules=self.rules,
+            databases=databases,
         )
 
     def _batch(self, batch: str) -> None:
         text = batch.strip()
         upper = text.upper()
         if upper.startswith("USE "):
+            if not self.allow_cross_database:
+                raise ValueError("USE is not supported for a single-database dialect")
             match = re.search(rf"USE\s+({_IDENT})", text, re.IGNORECASE)
             if match:
-                self.search_path = _unquote(match.group(1))
+                self.current_database = _unquote(match.group(1))
             return
         if upper.startswith(("SET ", "PRINT ", ":R ", "DECLARE ")):
             return
@@ -240,18 +247,18 @@ class SqlServerDumpLoader:
             self.schemas.add(_unquote(match.group(1)))
 
     def _store_object(self, kind: str, statement: str) -> None:
-        schema, name = None, None
+        database = schema = name = None
         patterns = {
-            "view": rf"CREATE\s+(?:OR\s+ALTER\s+)?VIEW\s+({_QUALIFIED})",
-            "sequence": rf"CREATE\s+SEQUENCE\s+({_QUALIFIED})",
-            "type": rf"CREATE\s+TYPE\s+({_QUALIFIED})",
-            "synonym": rf"CREATE\s+SYNONYM\s+({_QUALIFIED})",
+            "view": rf"CREATE\s+(?:OR\s+ALTER\s+)?VIEW\s+({_QUALIFIED3})",
+            "sequence": rf"CREATE\s+SEQUENCE\s+({_QUALIFIED3})",
+            "type": rf"CREATE\s+TYPE\s+({_QUALIFIED3})",
+            "synonym": rf"CREATE\s+SYNONYM\s+({_QUALIFIED3})",
         }
         pattern = patterns.get(kind)
         if pattern:
             match = re.search(pattern, statement, re.IGNORECASE)
             if match:
-                schema, name = _qualified(match.group(1), self.search_path)
+                database, schema, name = self._qualified3(match.group(1))
         self.objects.append(
             SqlObject(
                 kind=kind,
@@ -259,10 +266,40 @@ class SqlServerDumpLoader:
                 name=name,
                 definition=statement,
                 provenance=self._prov(statement, kind),
+                database=database,
             )
         )
 
     # ----------------------------------------------------------------- tables
+    def _qualified3(
+        self, name: str, default_schema: str = "dbo"
+    ) -> tuple[str | None, str, str]:
+        parts = re.findall(_IDENT, name)
+        if len(parts) >= 3:
+            return (
+                _unquote(parts[-3]),
+                _unquote(parts[-2]),
+                _unquote(parts[-1]),
+            )
+        if len(parts) == 2:
+            return (
+                self.current_database,
+                _unquote(parts[-2]),
+                _unquote(parts[-1]),
+            )
+        return (
+            self.current_database,
+            default_schema,
+            _unquote(parts[-1] if parts else name),
+        )
+
+    def _table_key(
+        self, database: str | None, schema: str, name: str
+    ) -> str:
+        if database:
+            return f"{database}.{schema}.{name}"
+        return f"{schema}.{name}"
+
     def _create_table(self, statement: str) -> None:
         tree = sqlglot.parse_one(statement, read="tsql")
         if not isinstance(tree, exp.Create) or tree.kind != "TABLE":
@@ -275,12 +312,22 @@ class SqlServerDumpLoader:
         table_expr = schema_expr.this
         if not isinstance(table_expr, exp.Table):
             return
-        schema = _unquote(table_expr.db) or self.search_path
+        schema = _unquote(table_expr.db) or "dbo"
         name = _unquote(table_expr.name)
+        database = (
+            _unquote(table_expr.catalog)
+            if table_expr.catalog
+            else self.current_database
+        )
+        if database and not self.allow_cross_database:
+            raise ValueError(
+                "cross-database table references are not supported by this dialect"
+            )
         table = Table(
             schema=schema,
             name=name,
             provenance=self._prov(statement, "table"),
+            database=database,
         )
         for node in schema_expr.expressions:
             if isinstance(node, exp.ColumnDef):
@@ -434,6 +481,11 @@ class SqlServerDumpLoader:
         if not isinstance(parent_expr, exp.Table):
             return
         parent_schema = _unquote(parent_expr.db) or table.schema
+        parent_database = (
+            _unquote(parent_expr.catalog)
+            if parent_expr.catalog
+            else self.current_database
+        )
         parent_columns = [item.name for item in ref_schema.expressions]
         table.foreign_keys.append(
             ForeignKey(
@@ -445,6 +497,8 @@ class SqlServerDumpLoader:
                 parent_table=_unquote(parent_expr.name),
                 parent_columns=parent_columns,
                 provenance=self._prov(statement, "foreign_key"),
+                child_database=table.database,
+                parent_database=parent_database,
             )
         )
 
@@ -455,8 +509,15 @@ class SqlServerDumpLoader:
         table_expr = tree.this
         if not isinstance(table_expr, exp.Table):
             return
-        schema = _unquote(table_expr.db) or self.search_path
-        table = self.tables.get(f"{schema}.{_unquote(table_expr.name)}")
+        schema = _unquote(table_expr.db) or "dbo"
+        database = (
+            _unquote(table_expr.catalog)
+            if table_expr.catalog
+            else self.current_database
+        )
+        table = self.tables.get(
+            self._table_key(database, schema, _unquote(table_expr.name))
+        )
         if table is None:
             return
         for action in tree.args.get("actions") or []:
@@ -495,8 +556,15 @@ class SqlServerDumpLoader:
         table_expr = index.args.get("table")
         if not isinstance(table_expr, exp.Table):
             return
-        schema = _unquote(table_expr.db) or self.search_path
-        table = self.tables.get(f"{schema}.{_unquote(table_expr.name)}")
+        schema = _unquote(table_expr.db) or "dbo"
+        database = (
+            _unquote(table_expr.catalog)
+            if table_expr.catalog
+            else self.current_database
+        )
+        table = self.tables.get(
+            self._table_key(database, schema, _unquote(table_expr.name))
+        )
         if table is None:
             return
         params = index.args.get("params")
@@ -539,31 +607,46 @@ class SqlServerDumpLoader:
         schema = (
             _unquote(schema_expr.db)
             if isinstance(schema_expr, exp.Table) and schema_expr.db
-            else self.search_path
+            else "dbo"
+        )
+        database = (
+            _unquote(schema_expr.catalog)
+            if isinstance(schema_expr, exp.Table) and schema_expr.catalog
+            else self.current_database
         )
         depends_on = []
-        own = f"{schema}.{name}" if name else None
+        own = self._table_key(database, schema, _unquote(name or ""))
         for table in tree.expression.find_all(exp.Table):
-            dep_schema = _unquote(table.db) or self.search_path
-            dep = f"{dep_schema}.{_unquote(table.name)}"
+            dep_database = (
+                _unquote(table.catalog) if table.catalog else self.current_database
+            )
+            dep_schema = _unquote(table.db) or "dbo"
+            dep = self._table_key(
+                dep_database, dep_schema, _unquote(table.name)
+            )
             if dep != own and dep not in depends_on:
                 depends_on.append(dep)
         for obj in reversed(self.objects):
-            if obj.kind == "view" and obj.schema == schema and obj.name == _unquote(name or ""):
+            if (
+                obj.kind == "view"
+                and obj.database == database
+                and obj.schema == schema
+                and obj.name == _unquote(name or "")
+            ):
                 obj.depends_on = depends_on
                 break
 
     def _create_routine(self, statement: str, kind: str) -> None:
         pattern = (
             rf"(?is)^CREATE\s+(?:OR\s+ALTER\s+)?(PROC(?:EDURE)?|FUNCTION)\s+"
-            rf"({_QUALIFIED})\s*(.*?)\bAS\b\s*"
+            rf"({_QUALIFIED3})\s*(.*?)\bAS\b\s*"
             rf"(?=(?:BEGIN|SET|SELECT|INSERT|UPDATE|DELETE|DECLARE|WITH|MERGE|"
             rf"IF|RETURN|EXEC|RAISERROR|THROW)\b)(.*)$"
         )
         match = re.match(pattern, statement)
         if not match:
             return
-        schema, name = _qualified(match.group(2), self.search_path)
+        database, schema, name = self._qualified3(match.group(2))
         header = match.group(3)
         returns = None
         if kind == "function":
@@ -587,20 +670,23 @@ class SqlServerDumpLoader:
             returns=returns,
             parameters=parameters,
             provenance=self._prov(statement, kind),
+            database=database,
         )
         self.functions.append(function)
 
     def _create_trigger(self, statement: str) -> None:
         match = re.match(
-            rf"(?is)^CREATE\s+(?:OR\s+ALTER\s+)?TRIGGER\s+({_QUALIFIED})\s+"
-            rf"ON\s+({_QUALIFIED})\s+(AFTER|FOR|INSTEAD\s+OF)\s+"
+            rf"(?is)^CREATE\s+(?:OR\s+ALTER\s+)?TRIGGER\s+({_QUALIFIED3})\s+"
+            rf"ON\s+({_QUALIFIED3})\s+(AFTER|FOR|INSTEAD\s+OF)\s+"
             rf"([A-Za-z,\s]+?)\s+AS\s+(.*)$",
             statement,
         )
         if not match:
             return
-        _schema, name = _qualified(match.group(1), self.search_path)
-        table_schema, table_name = _qualified(match.group(2), self.search_path)
+        _database, _schema, name = self._qualified3(match.group(1))
+        table_database, table_schema, table_name = self._qualified3(
+            match.group(2)
+        )
         timing = "INSTEAD OF" if match.group(3).upper().startswith("INSTEAD") else "AFTER"
         events = ", ".join(
             part.strip().upper()
@@ -610,7 +696,9 @@ class SqlServerDumpLoader:
         self.trigger_specs.append(
             {
                 "name": name,
-                "table_key": f"{table_schema}.{table_name}",
+                "table_key": self._table_key(
+                    table_database, table_schema, table_name
+                ),
                 "timing": timing,
                 "events": events,
                 "body": match.group(5).strip(),
@@ -648,7 +736,14 @@ class SqlServerDumpLoader:
                 candidates = {base, f"{base}s", f"{base}es"}
                 if base.endswith("y"):
                     candidates.add(f"{base[:-1]}ies")
-                for candidate in self.tables.values():
+                ordered_candidates = sorted(
+                    self.tables.values(),
+                    key=lambda item: (
+                        item.database != table.database,
+                        item.key,
+                    ),
+                )
+                for candidate in ordered_candidates:
                     if candidate.name not in candidates or len(candidate.primary_key) != 1:
                         continue
                     parent_column = candidate.primary_key[0]
@@ -671,6 +766,8 @@ class SqlServerDumpLoader:
                             provenance=Provenance(
                                 "inferred", "naming", f"{table.key}.{column.name}"
                             ),
+                            child_database=table.database,
+                            parent_database=candidate.database,
                         )
                     )
                     break
@@ -699,7 +796,7 @@ class SqlServerDumpLoader:
                 {
                     _unquote(match.group(2))
                     for match in re.finditer(
-                        rf"\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+({_QUALIFIED})",
+                        rf"\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+({_QUALIFIED3})",
                         body,
                         re.IGNORECASE,
                     )
@@ -709,7 +806,7 @@ class SqlServerDumpLoader:
                 {
                     _unquote(match.group(1))
                     for match in re.finditer(
-                        rf"\bFROM\s+({_QUALIFIED})", body, re.IGNORECASE
+                        rf"\bFROM\s+({_QUALIFIED3})", body, re.IGNORECASE
                     )
                 }
             )

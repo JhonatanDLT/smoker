@@ -45,19 +45,29 @@ Patterns are shell globs. `billing.*` matches every table in `billing`;
 
 ### Dialects
 
-`--dialect` selects the SQL renderer and the DDL loader. `postgres` is fully
-implemented; `sqlserver` is experimental and source-first. It needs the optional
-driver:
+`--dialect` selects the SQL renderer and the DDL loader:
+
+- `postgres` (fully implemented)
+- `sqlserver` (experimental, on-prem SQL Server)
+- `azuresql` (managed service; single database, no `USE`/cross-database)
 
 ```bash
 pip install "pgproof[sqlserver]"
 pgproof verify --dialect sqlserver --dsn-env PGPROOF_MSSQL_DSN
-pgproof generate --dialect sqlserver --dsn-env PGPROOF_TARGET_DSN
+pgproof verify --dialect azuresql --dsn-env PGPROOF_AZURE_DSN
+pgproof generate --dialect sqlserver --databases app,audit \
+  --source-env PGPROOF_MSSQL_DSN --target-env PGPROOF_MSSQL_DSN
 ```
 
-T-SQL dump loading, profiling, stored procedures and range partitions are
-implemented. Azure SQL, temporal history and `BULK INSERT` are still pending.
-The extension point is documented in [`architecture.md`](architecture.md).
+`--databases app,audit` or `--databases '*'` builds a multi-database catalog for
+on-prem SQL Server. Keys become `database.schema.table` and the writer/query
+runner use three-part names. Azure SQL rejects multiple databases.
+See [`azure-sql.md`](azure-sql.md).
+
+T-SQL dump loading, profiling, stored procedures, range partitions and filtered
+unique indexes are implemented. Temporal history and `BULK INSERT` are still
+pending. The extension point is documented in
+[`architecture.md`](architecture.md).
 
 ### Exit codes
 

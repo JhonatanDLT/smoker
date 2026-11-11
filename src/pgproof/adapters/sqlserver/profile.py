@@ -75,7 +75,7 @@ def profile_table(
     seed: int = 42,
 ) -> TableStats:
     dialect = SqlServerDialect()
-    qualified = dialect.quote_qualified(table.schema, table.name)
+    qualified = dialect.quote_table(table)
     with _cursor(connection) as cursor:
         cursor.execute(f"SELECT COUNT_BIG(*) FROM {qualified}")
         total = int(cursor.fetchone()[0])
