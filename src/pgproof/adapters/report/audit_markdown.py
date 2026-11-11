@@ -12,15 +12,19 @@ class AuditMarkdownRenderer:
         lines = [
             f"# Schema readiness audit — {audit.database}",
             "",
-            f"PostgreSQL {audit.server_version} · verdict: **{audit.verdict}**",
+            f"{audit.dialect} {audit.server_version} · verdict: **{audit.verdict}**",
             "",
             "## Inventory",
             "",
-            "| Tables | Columns | Foreign keys | Checks | Triggers |",
-            "|---:|---:|---:|---:|---:|",
+            (
+                "| Tables | Columns | Foreign keys | Checks | Triggers | "
+                "Functions | Procedures |"
+            ),
+            "|---:|---:|---:|---:|---:|---:|---:|",
             (
                 f"| {audit.tables} | {audit.columns} | {audit.foreign_keys} | "
-                f"{audit.checks} | {audit.triggers} |"
+                f"{audit.checks} | {audit.triggers} | {audit.functions} | "
+                f"{audit.procedures} |"
             ),
             "",
             "## What pgproof would verify",

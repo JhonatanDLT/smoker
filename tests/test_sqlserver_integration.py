@@ -8,6 +8,7 @@ from pgproof.adapters.script import SqlFileWriter
 from pgproof.adapters.spec.yaml_loader import YamlSpecLoader
 from pgproof.adapters.sqlserver.dialect import SqlServerDialect
 from pgproof.adapters.sqlserver.introspect import _cursor, connect, introspect
+from pgproof.adapters.sqlserver.profile import profile_catalog
 from pgproof.adapters.sqlserver.query_runner import SqlServerQueryRunner
 from pgproof.adapters.sqlserver.writer import SqlServerRowWriter
 from pgproof.application.generate import GenerateDataset
@@ -190,5 +191,189 @@ def test_sqlserver_rich_types_and_script_export(tmp_path) -> None:
         ).execute(VerifyRequest(dataset_hash="n/a"))
     finally:
         connection.close()
+
+    assert report.verdict == "PASS"
+
+    connection = connect(MSSQL_DSN)
+    try:
+        profile = profile_catalog(
+            connection, catalog.tables, sample=5, method="limit", seed=11
+        )
+    finally:
+        connection.close()
+    assert profile.table("pgproof_rich.orders") is not None
+    assert profile.column("pgproof_rich.orders", "total") is not None
+
+
+DUMP = """
+IF OBJECT_ID('pgproof_dump.v_children', 'V') IS NOT NULL DROP VIEW [pgproof_dump].[v_children];
+IF OBJECT_ID('pgproof_dump.children_guard', 'TR') IS NOT NULL DROP TRIGGER [pgproof_dump].[children_guard];
+IF OBJECT_ID('pgproof_dump.p_children', 'P') IS NOT NULL DROP PROCEDURE [pgproof_dump].[p_children];
+IF OBJECT_ID('pgproof_dump.children', 'U') IS NOT NULL DROP TABLE [pgproof_dump].[children];
+IF OBJECT_ID('pgproof_dump.parents', 'U') IS NOT NULL DROP TABLE [pgproof_dump].[parents];
+IF SCHEMA_ID('pgproof_dump') IS NOT NULL EXEC('DROP SCHEMA pgproof_dump');
+GO
+CREATE SCHEMA [pgproof_dump];
+GO
+CREATE TABLE [pgproof_dump].[parents] (
+    [id] int IDENTITY(1,1) NOT NULL CONSTRAINT [parents_pk] PRIMARY KEY,
+    [name] nvarchar(80) NOT NULL,
+    [active] bit NOT NULL DEFAULT 1
+);
+GO
+CREATE TABLE [pgproof_dump].[children] (
+    [id] int IDENTITY(1,1) NOT NULL CONSTRAINT [children_pk] PRIMARY KEY,
+    [parent_id] int NOT NULL,
+    [amount] decimal(12,2) NOT NULL
+        CONSTRAINT [children_amount] CHECK ([amount] >= 0),
+    CONSTRAINT [children_parent_fk] FOREIGN KEY ([parent_id])
+        REFERENCES [pgproof_dump].[parents]([id])
+);
+GO
+CREATE VIEW [pgproof_dump].[v_children] AS
+    SELECT [id], [parent_id], [amount] FROM [pgproof_dump].[children];
+GO
+CREATE PROCEDURE [pgproof_dump].[p_children] @min decimal(12,2) AS
+BEGIN
+    IF @min < 0 THROW 50001, 'negative', 1;
+    SELECT [id] FROM [pgproof_dump].[children] WHERE [amount] >= @min;
+END;
+GO
+CREATE TRIGGER [pgproof_dump].[children_guard]
+ON [pgproof_dump].[children] AFTER INSERT AS
+BEGIN
+    IF EXISTS (SELECT 1 FROM inserted WHERE [amount] < 0)
+        THROW 50002, 'bad amount', 1;
+END;
+GO
+"""
+
+
+def test_dump_loading_applies_to_sqlserver_and_generates(tmp_path) -> None:
+    assert MSSQL_DSN
+    dump_file = tmp_path / "schema.sql"
+    dump_file.write_text(DUMP, encoding="utf-8")
+
+    from pgproof.adapters.sqlserver.dump import SqlServerDumpLoader, split_batches
+
+    catalog = SqlServerDumpLoader().load(DUMP)
+    assert catalog.table("pgproof_dump.children").foreign_keys
+    routine = next(
+        item for item in catalog.functions if item.kind == "procedure"
+    )
+    assert routine.name == "p_children"
+    assert "THROW" in routine.body
+
+    connection = connect(MSSQL_DSN)
+    try:
+        with _cursor(connection) as cursor:
+            cursor.execute("SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON;")
+            for batch in split_batches(DUMP):
+                cursor.execute(batch)
+        connection.commit()
+    finally:
+        connection.close()
+
+    live_connection = connect(MSSQL_DSN)
+    try:
+        live = filter_catalog(introspect(live_connection), schemas=["pgproof_dump"])
+    finally:
+        live_connection.close()
+    live_routine = next(
+        item for item in live.functions if item.name == "p_children"
+    )
+    assert live_routine.kind == "procedure"
+    assert any(
+        rule.expression == "@min >= 0" and rule.provenance.kind == "function"
+        for rule in live.rules
+    )
+
+    connection = connect(MSSQL_DSN)
+    writer = SqlServerRowWriter(connection)
+    try:
+        generated = GenerateDataset(catalog, writer, rows=5, seed=3).execute()
+    finally:
+        writer.close()
+
+    verify_connection = connect(MSSQL_DSN)
+    try:
+        report = VerifyDataset(
+            catalog,
+            SqlServerQueryRunner(verify_connection),
+            YamlSpecLoader(),
+            SqlServerDialect(),
+            seed=3,
+        ).execute(
+            VerifyRequest(dataset_hash=generated.dataset_hash, plan=generated.plan)
+        )
+    finally:
+        verify_connection.close()
+
+    assert report.verdict == "PASS"
+
+
+def test_sqlserver_range_partition_introspection_and_generation() -> None:
+    assert MSSQL_DSN
+    connection = connect(MSSQL_DSN)
+    try:
+        with _cursor(connection) as cursor:
+            cursor.execute(
+                """
+                SET QUOTED_IDENTIFIER ON;
+                IF OBJECT_ID('pgproof_parts.events','U') IS NOT NULL
+                    DROP TABLE pgproof_parts.events;
+                IF EXISTS (SELECT 1 FROM sys.partition_schemes WHERE name='ps_events')
+                    DROP PARTITION SCHEME ps_events;
+                IF EXISTS (SELECT 1 FROM sys.partition_functions WHERE name='pf_events')
+                    DROP PARTITION FUNCTION pf_events;
+                IF SCHEMA_ID('pgproof_parts') IS NULL
+                    EXEC('CREATE SCHEMA pgproof_parts');
+                CREATE PARTITION FUNCTION pf_events (int)
+                    AS RANGE RIGHT FOR VALUES (100, 200, 300);
+                CREATE PARTITION SCHEME ps_events
+                    AS PARTITION pf_events ALL TO ([PRIMARY]);
+                CREATE TABLE pgproof_parts.events (
+                    id int IDENTITY(1,1) NOT NULL,
+                    bucket int NOT NULL,
+                    amount decimal(12,2) NOT NULL
+                        CONSTRAINT parts_amount CHECK (amount >= 0),
+                    CONSTRAINT parts_pk PRIMARY KEY (id, bucket)
+                        ON ps_events(bucket)
+                ) ON ps_events(bucket);
+                """
+            )
+        connection.commit()
+        catalog = filter_catalog(introspect(connection), schemas=["pgproof_parts"])
+    finally:
+        connection.close()
+
+    table = catalog.table("pgproof_parts.events")
+    assert table.is_partitioned is True
+    assert table.partition_strategy == "range"
+    assert table.partition_key == ["bucket"]
+    assert table.partitions
+    assert table.partitions[0].lower == [100]
+    assert table.partitions[0].upper == [300]
+
+    connection = connect(MSSQL_DSN)
+    writer = SqlServerRowWriter(connection)
+    try:
+        generated = GenerateDataset(catalog, writer, rows=10, seed=4).execute()
+    finally:
+        writer.close()
+
+    verify_connection = connect(MSSQL_DSN)
+    try:
+        report = VerifyDataset(
+            catalog,
+            SqlServerQueryRunner(verify_connection),
+            YamlSpecLoader(),
+            SqlServerDialect(),
+            seed=4,
+        ).execute(
+            VerifyRequest(dataset_hash=generated.dataset_hash, plan=generated.plan)
+        )
+    finally:
+        verify_connection.close()
 
     assert report.verdict == "PASS"

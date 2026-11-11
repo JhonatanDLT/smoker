@@ -25,6 +25,9 @@ class Audit:
     foreign_keys: int
     checks: int
     triggers: int
+    dialect: str = "postgres"
+    functions: int = 0
+    procedures: int = 0
     invariants: dict[str, int] = field(default_factory=dict)
     risks: list[Risk] = field(default_factory=list)
 

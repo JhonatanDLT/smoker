@@ -478,19 +478,24 @@ The CLI exposes `--dialect`; unknown names fail with the available list. Only
 `adapters/sqlserver/` implements:
 
 - `dialect.py`: `[brackets]`, `N'...'` literals, type mapping, `COUNT_BIG`,
-  `TOP`, `WHERE NOT (...)`, scripts (`SET XACT_ABORT`, `SET IDENTITY_INSERT`,
-  `DBCC CHECKIDENT`, FK-ordered `DELETE`).
+  `TOP`, `WHERE NOT (...)`, scripts (`SET ANSI_NULLS`, `SET QUOTED_IDENTIFIER`,
+  `SET XACT_ABORT`, `SET IDENTITY_INSERT`, `DBCC CHECKIDENT`, FK-ordered `DELETE`).
 - `introspect.py`: `sys.tables`, `sys.columns`, `sys.indexes`,
   `sys.foreign_keys`, `sys.check_constraints`, `sys.triggers`,
-  `sys.sql_modules`, `sys.sequences` and partition schemes.
+  `sys.sql_modules`, `sys.sequences`, partition schemes and procedures/functions.
+- `dump.py`: T-SQL batches (`GO`), `IDENTITY`, computed, `ROWVERSION`, checks,
+  FKs, unique indexes, views, procedures, functions, triggers, sequences and
+  user-defined types.
 - `query_runner.py`: counts, samples, untrusted constraints, table counts and
   deterministic digest.
 - `writer.py`: `pyodbc` `fast_executemany`, identity insert, reseed.
+- `profile.py`: `TOP`/`TABLESAMPLE` sampling and the canonical distribution
+  profile.
 - `sql_executor.py`: repair statements.
 
-It is source-first and was verified against SQL Server 2022 Developer in a
-container. T-SQL dump loading and profiling raise a clear
-`NotImplementedError`. The driver is optional:
+It was verified against SQL Server 2022 Developer in a container, including
+dump → server → generate → verify, stored procedures, range partitions and
+profiling. The driver is optional:
 
 ```bash
 pip install "pgproof[sqlserver]"

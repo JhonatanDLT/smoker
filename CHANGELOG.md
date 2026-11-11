@@ -4,6 +4,34 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [0.9.2] — 2026-11-11
+
+### Added
+
+- **T-SQL dump loader** (`adapters/sqlserver/dump.py`): `GO` batches,
+  bracketed identifiers, `IDENTITY`, computed columns, `ROWVERSION`, defaults,
+  checks, FKs, unique indexes, views, stored procedures, functions, triggers,
+  sequences and user-defined types. `load-dump --dialect sqlserver` works.
+- **Stored procedures** are exposed with `kind="procedure"`, parameters, body,
+  `writes`/`reads`, `conditions` and a dedicated `procedure` creation-order
+  phase. The audit reports function/procedure counts and a visibility risk.
+- **SQL Server profiler**: `TOP`/`TABLESAMPLE` sampling, null fractions, distinct
+  counts, top values and date/numeric buckets.
+- **SQL Server range partitions** mapped from partition functions/schemes into
+  the canonical `Partition` tree; generation samples inside the boundaries.
+- **T-SQL segmentation extraction**: `IF ... THROW/RAISERROR` guards from
+  procedures and triggers become report-only candidates with provenance.
+
+### Fixed
+
+- SQL Server `sys.objects.type` comparison for procedures.
+- Compound/`EXISTS` trigger conditions are not mis-negated into invalid rules.
+- SQL Server integration now covers dump → server → generate → verify.
+
+### Measured
+
+- 148 tests; all pass with PostgreSQL 16 and SQL Server 2022 Developer.
+
 ## [0.9.1] — 2026-11-11
 
 ### Verified against a real SQL Server

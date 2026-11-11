@@ -221,6 +221,7 @@ class Function:
     kind: str = "function"
     language: str | None = None
     returns: str | None = None
+    parameters: list[str] = field(default_factory=list)
     statements: list[str] = field(default_factory=list)
     conditions: list[str] = field(default_factory=list)
     writes: list[str] = field(default_factory=list)

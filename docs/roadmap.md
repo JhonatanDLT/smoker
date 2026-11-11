@@ -79,14 +79,16 @@ The order is deliberate: each phase is funded by the previous one.
 - Dialect-aware invariant SQL, SQL export and report label.
 - Architecture guard against PostgreSQL SQL in the core.
 
-## v0.9 — SQL Server (source-first, delivered experimentally in 0.9.0)
+## v0.9 — SQL Server (delivered experimentally in 0.9.x)
 
 - `sys.*` introspection, T-SQL dialect, query runner, writer and executor.
 - SQL Server as a **source** for migration validation.
 - SQL Server as a **target** for generation and repair.
+- T-SQL dump loader, profiler, stored procedures and range partitions.
 - Same invariant model, same report.
-- Pending: T-SQL dump loader, profiler, partition tree, full integration run
-  against a real instance, and `BULK INSERT`.
+- Verified against SQL Server 2022 Developer (dump → server → generate → verify).
+- Pending: Azure SQL, temporal history, filtered unique indexes, `BULK INSERT`
+  and the CI service container.
 
 ## v0.10 — Other dialects (months 7–9)
 

@@ -55,8 +55,9 @@ pgproof verify --dialect sqlserver --dsn-env PGPROOF_MSSQL_DSN
 pgproof generate --dialect sqlserver --dsn-env PGPROOF_TARGET_DSN
 ```
 
-T-SQL dump loading and SQL Server profiling are not implemented yet. The
-extension point is documented in [`architecture.md`](architecture.md).
+T-SQL dump loading, profiling, stored procedures and range partitions are
+implemented. Azure SQL, temporal history and `BULK INSERT` are still pending.
+The extension point is documented in [`architecture.md`](architecture.md).
 
 ### Exit codes
 

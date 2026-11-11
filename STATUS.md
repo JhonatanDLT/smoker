@@ -1,7 +1,7 @@
 # Status
 
 **Date:** 2026-11-11
-**Version:** 0.9.1
+**Version:** 0.9.2
 **State:** working v1 plus CI output, repair loop, distribution-aware
 generation, partitioned tables, offline schema dumps, segmentation rules, a
 dependency-safe creation order, SQL export, exclusion-aware generation, a
@@ -31,9 +31,11 @@ SQL Server 2022.
 | **Dialect layer** (`SqlDialect`, `Capabilities`, registry) | ✅ |
 | **`DatabaseAdapter` aggregate** (dialect + connection factories) | ✅ |
 | **SQL Server dialect, introspection, query runner and writer** (experimental, verified) | ✅ |
-| **T-SQL dump loader and SQL Server profiler** | ❌ pending |
+| **T-SQL dump loader, profiler and range partitions** | ✅ |
+| **Stored procedures** with parameters, body and creation order | ✅ |
+| **T-SQL segmentation** (`IF ... THROW/RAISERROR`) | ✅ report-only |
 | **Dialect-aware invariant SQL, SQL export and report label** | ✅ |
-| **`--dialect` extension point** (SQL Server adapter pending) | ✅ |
+| **`--dialect` extension point** (PostgreSQL + SQL Server) | ✅ |
 | Invariants from NOT NULL, UNIQUE, PK, FK, CHECK, enums | ✅ |
 | Application rules from YAML spec | ✅ |
 | Deterministic generation (seed per table) | ✅ |
@@ -112,14 +114,16 @@ SQL Server 2022.
   the report passed.
 - **Dialect layer:** PostgreSQL invariant SQL moved out of the core; the
   dialect and architecture contract tests enforce the boundary.
-- **SQL Server:** T-SQL dialect, `sys.*` introspection, query runner and writer
-  are implemented and registered as `--dialect sqlserver`; integration tests
-  run against SQL Server 2022 Developer.
-- **141 tests passing** with both `PGPROOF_TEST_DSN` and `PGPROOF_MSSQL_DSN`:
+- **SQL Server:** T-SQL dialect, `sys.*` introspection, query runner, writer,
+  dump loader, profiler and range partitions are implemented and registered as
+  `--dialect sqlserver`; integration tests run against SQL Server 2022
+  Developer.
+- **148 tests passing** with both `PGPROOF_TEST_DSN` and `PGPROOF_MSSQL_DSN`:
   PostgreSQL 16 plus SQL Server 2022 Developer in a container.
 - SQL Server integration covers source introspection, verification, generation,
-  identity/computed/rowversion, `varbinary`/`uniqueidentifier`/`datetime2` and
-  SQL script export applied to the server.
+  identity/computed/rowversion, `varbinary`/`uniqueidentifier`/`datetime2`,
+  stored procedures, range partitions, profiling and dump → server → generate →
+  verify.
 - Same seed produces the same dataset hash every run.
 
 ## Documentation
@@ -193,9 +197,10 @@ cli ──► application ──► core (domain + ports)
 - Distributions are per column; correlations are not modelled.
 - No parallel verification yet.
 - Cross-table rules need an explicit `repair:` declaration.
-- SQL Server is implemented source-first (experimental) and was verified against
-  SQL Server 2022 Developer. T-SQL dump loading, profiling and partition-tree
-  mapping are pending; it is not yet production-ready.
+- SQL Server is experimental and verified against SQL Server 2022 Developer.
+  Dump loading, profiling and range partitions are implemented; Azure SQL,
+  temporal history generation, filtered unique indexes and `BULK INSERT` are
+  still pending.
 - MySQL and Oracle adapters are not implemented yet; the dialect contract and
   registry are ready for them.
 - Static code analysis is a roadmap item.
@@ -204,10 +209,9 @@ See [`docs/limitations.md`](docs/limitations.md).
 
 ## Next tasks
 
-1. Add the SQL Server integration suite to CI (container + `PGPROOF_MSSQL_DSN`)
-   and keep it green.
-2. T-SQL dump loader (`GO`, `[brackets]`, `IDENTITY`, `MERGE`) and SQL Server
-   profiler.
+1. Add SQL Server to CI (container + `PGPROOF_MSSQL_DSN`) and keep it green.
+2. Azure SQL, temporal history, filtered unique indexes and `BULK INSERT` for
+   full SQL Server parity.
 3. Column correlations and parallel verification.
 4. Publish to PyPI and the GitHub Marketplace; first design-partner pilot.
 

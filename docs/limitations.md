@@ -154,8 +154,9 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
 
 ## SQL Server limits (experimental)
 
-- The adapter is **source-first**: live introspection, verification, generation
-  and repair are implemented; T-SQL dump loading and profiling are not.
+- Live introspection, verification, generation, repair, T-SQL dump loading,
+  profiling and range partitions are implemented. Stored procedures, functions
+  and triggers are inventoried with parameters/body and segmentation guards.
 - Install the driver with `pip install "pgproof[sqlserver]"` and set
   `PGPROOF_MSSQL_DSN` (ODBC connection string).
 - Integration tests are gated by `PGPROOF_MSSQL_DSN`. They were verified against
@@ -163,8 +164,8 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
   default CI matrix.
 - `EXCLUDE` does not exist in SQL Server; the capability is false and the
   verifier reports it as unsupported when a catalog carries one.
-- Partition schemes/functions are stored as raw objects; the partition tree is
-  not mapped yet.
+- Partition functions/schemes are mapped to a single canonical range node. The
+  generator samples inside the boundary range; SQL Server routes the rows.
 - Temporal tables: system-period columns are marked non-writable; history table
   generation is not implemented.
 - Filtered unique indexes are not treated as global unique constraints.
@@ -173,13 +174,16 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
   reseeded with `DBCC CHECKIDENT` in SQL scripts.
 - SQL Server `datetime2`/`datetimeoffset` precision is set from the catalog;
   `rowversion` and computed columns are never written.
+- Azure SQL, `BULK INSERT`, filtered unique indexes and full temporal history are
+  not covered yet.
 
 ## Dialect limits
 
-- PostgreSQL is fully implemented. SQL Server is experimental and source-first.
-  MySQL and Oracle adapters do not exist yet; the `SqlDialect` contract,
-  `Capabilities`, registry, `DdlLoader` port and `--dialect` flag are ready for
-  them.
+- PostgreSQL is fully implemented. SQL Server is experimental but covers live
+  introspection, dump loading, generation, verification, profiling, repair,
+  stored procedures and range partitions. MySQL and Oracle adapters do not
+  exist yet; the `SqlDialect` contract, `Capabilities`, registry, `DdlLoader`
+  port and `--dialect` flag are ready for them.
 - The report records the `dialect` used, so mixed-dialect comparisons are
   possible.
 

@@ -281,10 +281,12 @@ def load_dump_cmd(
     out.write_text(
         json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
     )
+    functions = sum(1 for item in catalog.functions if item.kind != "procedure")
+    procedures = sum(1 for item in catalog.functions if item.kind == "procedure")
     typer.echo(
         f"{len(catalog.tables)} tables · "
         f"{sum(len(table.columns) for table in catalog.tables)} columns · "
-        f"{len(catalog.functions)} functions → {out}"
+        f"{functions} functions · {procedures} procedures → {out}"
     )
 
 

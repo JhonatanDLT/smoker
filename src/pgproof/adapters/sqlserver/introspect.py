@@ -8,6 +8,7 @@ later.
 from __future__ import annotations
 
 import logging
+import re
 from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -17,9 +18,12 @@ from ...core.ir import (
     Catalog,
     CheckConstraint,
     Column,
+    DataKind,
     ForeignKey,
     Function,
+    Partition,
     Provenance,
+    RuleCandidate,
     SqlObject,
     Table,
     Trigger,
@@ -325,6 +329,110 @@ def _constraints(conn: Any, tables: dict[str, Table]) -> None:
         )
 
 
+def _partitions(conn: Any, tables: dict[str, Table]) -> None:
+    by_object: dict[int, Table] = {}
+    with _cursor(conn) as cursor:
+        cursor.execute(
+            "SELECT object_id, schema_name, table_name FROM ("
+            "SELECT t.object_id, s.name AS schema_name, t.name AS table_name "
+            "FROM sys.tables t JOIN sys.schemas s ON s.schema_id = t.schema_id"
+            ") q"
+        )
+        for object_id, schema_name, table_name in cursor.fetchall():
+            table = tables.get(f"{schema_name}.{table_name}")
+            if table is not None:
+                by_object[int(object_id)] = table
+
+    query = """
+        SELECT t.object_id, c.name AS partition_column,
+               pf.boundary_value_on_right,
+               prv.boundary_id,
+               CAST(prv.value AS nvarchar(100)) AS boundary
+        FROM sys.tables t
+        JOIN sys.indexes i
+          ON i.object_id = t.object_id AND i.index_id IN (0, 1)
+        JOIN sys.partition_schemes ps
+          ON ps.data_space_id = i.data_space_id
+        JOIN sys.partition_functions pf
+          ON pf.function_id = ps.function_id
+        JOIN sys.index_columns ic
+          ON ic.object_id = i.object_id
+         AND ic.index_id = i.index_id
+         AND ic.partition_ordinal > 0
+        JOIN sys.columns c
+          ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+        LEFT JOIN sys.partition_range_values prv
+          ON prv.function_id = pf.function_id
+        WHERE t.is_ms_shipped = 0
+        ORDER BY t.object_id, prv.boundary_id
+    """
+    try:
+        with _cursor(conn) as cursor:
+            cursor.execute(query)
+            rows = cursor.fetchall()
+    except Exception as exc:  # noqa: BLE001 - partitioning is optional
+        logger.debug("could not read partitions: %s", exc)
+        return
+
+    grouped: dict[int, list[Any]] = defaultdict(list)
+    column_by_table: dict[int, str] = {}
+    for row in rows:
+        object_id = int(row.object_id)
+        column_by_table[object_id] = str(row.partition_column)
+        if row.boundary is not None:
+            grouped[object_id].append(row)
+
+    for object_id, boundaries in grouped.items():
+        table = by_object.get(object_id)
+        if table is None:
+            continue
+        column_name = column_by_table[object_id]
+        try:
+            column = table.column(column_name)
+        except KeyError:
+            continue
+        values = []
+        for row in boundaries:
+            try:
+                values.append(_partition_value(row.boundary, column))
+            except (TypeError, ValueError):
+                continue
+        if not values:
+            continue
+        table.is_partitioned = True
+        table.partition_strategy = "range"
+        table.partition_key = [column_name]
+        table.partitions = [
+            Partition(
+                schema=table.schema,
+                name=f"{table.name}_partition",
+                strategy="range",
+                columns=[column_name],
+                lower=[min(values)],
+                upper=[max(values)],
+            )
+        ]
+
+
+def _partition_value(value: Any, column: Any) -> Any:
+    text = str(value)
+    if column.data_kind in {DataKind.SMALLINT, DataKind.INT, DataKind.BIGINT}:
+        return int(text)
+    if column.data_kind == DataKind.NUMERIC:
+        from decimal import Decimal
+
+        return Decimal(text)
+    if column.data_kind == DataKind.DATE:
+        from datetime import date
+
+        return date.fromisoformat(text.split(" ")[0])
+    if column.data_kind in {DataKind.TIMESTAMP, DataKind.TIMESTAMPTZ}:
+        from datetime import datetime
+
+        return datetime.fromisoformat(text.replace(" ", "T"))
+    return text
+
+
 def _triggers(conn: Any, tables: dict[str, Table]) -> None:
     by_object = {f"{table.schema}.{table.name}": table for table in tables.values()}
     with _cursor(conn) as cursor:
@@ -407,7 +515,7 @@ def _objects(conn: Any, tables: dict[str, Table]) -> tuple[list[Function], list[
                     schema=str(row.schema_name),
                     name=str(row.name),
                     body=definition,
-                    kind="procedure" if str(row.type) in {"P", "PC"} else "function",
+                    kind="procedure" if str(row.type).strip() in {"P", "PC"} else "function",
                     language="tsql",
                     provenance=Provenance("catalog", "sys.objects", "function"),
                 )
@@ -487,6 +595,112 @@ def _objects(conn: Any, tables: dict[str, Table]) -> tuple[list[Function], list[
     return functions, objects
 
 
+def _negate_tsql(condition: str) -> str | None:
+    text = re.sub(r"^\(+|\)+$", "", condition.strip()).strip()
+    if re.search(r"[()]|\b(AND|OR|EXISTS|SELECT|INSERTED|DELETED)\b", text, re.IGNORECASE):
+        return None
+    flip = {"<": ">=", "<=": ">", ">": "<=", ">=": "<", "=": "<>", "<>": "=", "!=": "="}
+    match = re.match(r"^(.+?)\s*(<=|>=|<>|!=|=|<|>)\s*(.+)$", text, re.DOTALL)
+    if match and match.group(2) in flip:
+        return f"{match.group(1).strip()} {flip[match.group(2)]} {match.group(3).strip()}"
+    return None
+
+
+def _conditions(body: str) -> list[str]:
+    return [
+        " ".join(match.group(1).split())
+        for match in re.finditer(
+            r"\bIF\s+(.+?)\s+(?:BEGIN|THROW|RAISERROR)\b",
+            body,
+            re.IGNORECASE | re.DOTALL,
+        )
+    ]
+
+
+def _analyze_functions(functions: list[Function]) -> list[RuleCandidate]:
+    rules: list[RuleCandidate] = []
+    for function in functions:
+        body = function.body or ""
+        function.conditions = _conditions(body)
+        function.statements = [
+            match.group(1).replace("''", "'")
+            for match in re.finditer(
+                r"\b(?:EXEC(?:UTE)?|sp_executesql)\s*(?:\(\s*)?N?'((?:[^']|'')*)'",
+                body,
+                re.IGNORECASE | re.DOTALL,
+            )
+        ]
+        function.writes = sorted(
+            {
+                str(match.group(2))
+                for match in re.finditer(
+                    r"\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+([\[\]\w.]+)",
+                    body,
+                    re.IGNORECASE,
+                )
+            }
+        )
+        function.reads = sorted(
+            {
+                str(match.group(1))
+                for match in re.finditer(
+                    r"\bFROM\s+([\[\]\w.]+)", body, re.IGNORECASE
+                )
+            }
+        )
+        if "THROW" not in body.upper() and "RAISERROR" not in body.upper():
+            continue
+        for condition in function.conditions:
+            expression = _negate_tsql(condition)
+            if expression is None:
+                continue
+            rules.append(
+                RuleCandidate(
+                    id=f"rule:{function.schema}.{function.name}:{len(rules) + 1}",
+                    kind="guard",
+                    table="",
+                    expression=expression,
+                    confidence=0.6,
+                    applied=False,
+                    provenance=Provenance(
+                        "function",
+                        function.name,
+                        f"{function.schema}.{function.name}",
+                    ),
+                    note=f"IF {condition} THEN THROW/RAISERROR (segmentation only)",
+                )
+            )
+    return rules
+
+
+def _analyze_triggers(tables: dict[str, Table]) -> list[RuleCandidate]:
+    rules: list[RuleCandidate] = []
+    for table in tables.values():
+        for trigger in table.triggers:
+            body = trigger.body or ""
+            if "THROW" not in body.upper() and "RAISERROR" not in body.upper():
+                continue
+            for condition in _conditions(body):
+                expression = _negate_tsql(condition)
+                if expression is None:
+                    continue
+                rules.append(
+                    RuleCandidate(
+                        id=f"rule:{table.key}:{trigger.name}:{len(rules) + 1}",
+                        kind="guard",
+                        table=table.key,
+                        expression=expression,
+                        confidence=0.6,
+                        applied=False,
+                        provenance=Provenance(
+                            "trigger", trigger.name, table.key
+                        ),
+                        note=f"IF {condition} THEN THROW/RAISERROR (segmentation only)",
+                    )
+                )
+    return rules
+
+
 def introspect(conn: Any) -> Catalog:
     dialect = SqlServerDialect()
     with _cursor(conn) as cursor:
@@ -500,8 +714,11 @@ def introspect(conn: Any) -> Catalog:
 
     tables = _tables(conn, dialect)
     _constraints(conn, tables)
+    _partitions(conn, tables)
     _triggers(conn, tables)
     functions, objects = _objects(conn, tables)
+    rules = _analyze_functions(functions)
+    rules.extend(_analyze_triggers(tables))
     return Catalog(
         database=database,
         server_version=version,
@@ -509,6 +726,7 @@ def introspect(conn: Any) -> Catalog:
         schemas=sorted({table.schema for table in tables.values()}),
         functions=functions,
         objects=objects,
+        rules=rules,
     )
 
 

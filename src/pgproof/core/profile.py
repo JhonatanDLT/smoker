@@ -8,9 +8,92 @@ without touching production again.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time
+from datetime import time as time_value
 from decimal import Decimal
 from typing import Any
+
+BUCKETS = 20
+TOP_K = 20
+
+
+def hashable(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, (dict, list, set)):
+        return repr(value)
+    return str(value)
+
+
+def is_numeric(value: Any) -> bool:
+    return isinstance(value, (int, float, Decimal)) and not isinstance(value, bool)
+
+
+def bucket_kind(data_kind: Any) -> str:
+    from .ir import DataKind
+
+    return {
+        DataKind.DATE: "date",
+        DataKind.TIMESTAMP: "timestamp",
+        DataKind.TIMESTAMPTZ: "timestamptz",
+        DataKind.TIME: "time",
+    }.get(data_kind, "numeric")
+
+
+def axis(value: Any, kind: str) -> float:
+    if kind == "date" and isinstance(value, date) and not isinstance(value, datetime):
+        return float(value.toordinal())
+    if kind == "timestamp" and isinstance(value, datetime):
+        if value.tzinfo is not None:
+            value = value.astimezone(UTC).replace(tzinfo=None)
+        return (value - datetime(1970, 1, 1)).total_seconds()
+    if kind == "timestamptz" and isinstance(value, datetime):
+        return value.timestamp()
+    if kind == "time" and isinstance(value, time_value):
+        return (
+            value.hour * 3600
+            + value.minute * 60
+            + value.second
+            + value.microsecond / 1_000_000
+        )
+    return float(value)
+
+
+def buckets(values: list[Any], kind: str) -> list[tuple[float, float, int]]:
+    numeric = [axis(value, kind) for value in values if value is not None]
+    if len(numeric) < BUCKETS:
+        return []
+    low, high = min(numeric), max(numeric)
+    if high <= low:
+        return []
+    width = (high - low) / BUCKETS
+    counts = [0] * BUCKETS
+    for value in numeric:
+        index = min(int((value - low) / width), BUCKETS - 1)
+        counts[index] += 1
+    return [
+        (low + index * width, low + (index + 1) * width, count)
+        for index, count in enumerate(counts)
+        if count > 0
+    ]
+
+
+def restore(value: str) -> Any:
+    lowered = value.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    if lowered == "none":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        pass
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return value
 
 
 def _jsonable(value: Any) -> Any:

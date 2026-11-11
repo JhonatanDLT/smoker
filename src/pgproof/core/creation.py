@@ -176,24 +176,31 @@ def creation_order(catalog: Catalog) -> CreationOrder:
             + "; tables in the cycle are ordered together"
         )
 
-    for function in sorted(
+    routines = sorted(
         catalog.functions, key=lambda item: f"{item.schema}.{item.name}"
-    ):
+    )
+
+    def routine_step(function) -> CreationStep:  # type: ignore[no-untyped-def]
         name = f"{function.schema}.{function.name}"
         dependencies: list[str] = []
         for target in [*function.reads, *function.writes]:
             key = _resolve_table(catalog, target, function.schema)
             if key and key not in dependencies:
                 dependencies.append(key)
-        steps.append(
-            CreationStep(
-                phase="function",
-                kind=function.kind,
-                name=name,
-                depends_on=dependencies,
-                provenance=_provenance(function),
-            )
+        return CreationStep(
+            phase="procedure" if function.kind == "procedure" else "function",
+            kind=function.kind,
+            name=name,
+            depends_on=dependencies,
+            provenance=_provenance(function),
         )
+
+    for routine in routines:
+        if routine.kind != "procedure":
+            steps.append(routine_step(routine))
+    for routine in routines:
+        if routine.kind == "procedure":
+            steps.append(routine_step(routine))
 
     steps.extend(_object_steps(by_kind.get("index", []), "index", "index"))
 

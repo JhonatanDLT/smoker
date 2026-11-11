@@ -96,6 +96,20 @@ class AuditSchema:
         for invariant in invariants:
             counts[invariant.kind.value] = counts.get(invariant.kind.value, 0) + 1
 
+        functions = sum(
+            1 for routine in self.catalog.functions if routine.kind != "procedure"
+        )
+        procedures = sum(
+            1 for routine in self.catalog.functions if routine.kind == "procedure"
+        )
+        if procedures:
+            risks.append(
+                Risk(
+                    "low",
+                    "database",
+                    f"{procedures} stored procedures are inventoried but not executed.",
+                )
+            )
         return Audit(
             database=self.catalog.database,
             server_version=self.catalog.server_version,
@@ -104,6 +118,9 @@ class AuditSchema:
             foreign_keys=foreign_keys,
             checks=checks,
             triggers=triggers,
+            dialect=self.dialect.name,
+            functions=functions,
+            procedures=procedures,
             invariants=counts,
             risks=risks,
         )
