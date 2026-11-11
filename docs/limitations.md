@@ -152,15 +152,35 @@ It reports coverage, violations, skipped items and limitations. Nothing else.
 - Partitioned tables are checked per generated row, but `ctid`-based
   verification still needs manual review across partitions.
 
+## SQL Server limits (experimental)
+
+- The adapter is **source-first**: live introspection, verification, generation
+  and repair are implemented; T-SQL dump loading and profiling are not.
+- Install the driver with `pip install "pgproof[sqlserver]"` and set
+  `PGPROOF_MSSQL_DSN` (ODBC connection string).
+- Integration tests are gated by `PGPROOF_MSSQL_DSN`; they have not run in the
+  default CI environment.
+- `EXCLUDE` does not exist in SQL Server; the capability is false and the
+  verifier reports it as unsupported when a catalog carries one.
+- Partition schemes/functions are stored as raw objects; the partition tree is
+  not mapped yet.
+- Temporal tables: system-period columns are marked non-writable; history table
+  generation is not implemented.
+- Filtered unique indexes are not treated as global unique constraints.
+- `TRUNCATE` with foreign keys falls back to FK-ordered `DELETE`.
+- `IDENTITY` values are inserted with `SET IDENTITY_INSERT`; sequences are
+  reseeded with `DBCC CHECKIDENT` in SQL scripts.
+- SQL Server `datetime2`/`datetimeoffset` precision is set from the catalog;
+  `rowversion` and computed columns are never written.
+
 ## Dialect limits
 
-- PostgreSQL is the only implemented dialect. The `SqlDialect` contract,
-  `Capabilities`, registry, `DdlLoader` port and `--dialect` flag are in place
-  for SQL Server and others, but their adapters do not exist yet.
-- `--dialect` on `verify`, `run`, `generate` (database mode), `introspect` and
-  `profile` currently fails explicitly for non-PostgreSQL names.
+- PostgreSQL is fully implemented. SQL Server is experimental and source-first.
+  MySQL and Oracle adapters do not exist yet; the `SqlDialect` contract,
+  `Capabilities`, registry, `DdlLoader` port and `--dialect` flag are ready for
+  them.
 - The report records the `dialect` used, so mixed-dialect comparisons are
-  possible once a second adapter lands.
+  possible.
 
 ## Distribution and repair limits
 

@@ -49,7 +49,8 @@ pipx install pgproof
 pip install pgproof
 ```
 
-Requires Python 3.11+ and PostgreSQL 14–17.
+Requires Python 3.11+ and PostgreSQL 14–17. SQL Server 2019/2022 support is
+experimental and optional (`pip install "pgproof[sqlserver]"`).
 
 ---
 
@@ -74,7 +75,7 @@ open proof/report.html
 Expected output:
 
 ```
-pgproof 0.8.0 · 10 tables · 2,000 rows · seed 42
+pgproof 0.9.0 · 10 tables · 2,000 rows · seed 42
   generate billing.accounts        200 rows
   generate billing.plans           200 rows
   ...
@@ -208,6 +209,21 @@ candidates.
 `pgproof order --schema-file db/schema.sql -o -` lists extensions, enums, types,
 domains, sequences, tables in foreign-key order, functions, indexes, triggers,
 views, rules and policies, with the dependencies of each step.
+
+## SQL Server (experimental)
+
+The dialect layer and a source-first SQL Server adapter are in place:
+
+```bash
+pip install "pgproof[sqlserver]"
+export PGPROOF_MSSQL_DSN="DRIVER={ODBC Driver 18 for SQL Server};SERVER=...;DATABASE=...;UID=...;PWD=..."
+pgproof introspect --dialect sqlserver --dsn-env PGPROOF_MSSQL_DSN -o catalog.json
+pgproof verify --dialect sqlserver --dsn-env PGPROOF_MSSQL_DSN --out proof
+```
+
+Live introspection, verification, generation and repair are implemented.
+T-SQL dump loading and SQL Server profiling are not yet: they fail with a clear
+message. Integration tests are gated by `PGPROOF_MSSQL_DSN`.
 
 ## Repairs
 

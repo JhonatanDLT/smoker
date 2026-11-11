@@ -4,6 +4,43 @@ All notable changes to pgproof. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic
 versioning.
 
+## [0.9.0] — 2026-11-11
+
+### Added
+
+- **SQL Server adapter (experimental, source-first).**
+  - `adapters/sqlserver/dialect.py`: T-SQL quoting (`[x]`), `N'...'` literals,
+    type mapping, `COUNT_BIG`, `TOP`, `WHERE NOT (...)`, script statements and
+    `IDENTITY_INSERT`/`DBCC CHECKIDENT`.
+  - `adapters/sqlserver/introspect.py`: `sys.tables`, `sys.columns`,
+    `sys.indexes`, `sys.foreign_keys`, `sys.check_constraints`, triggers,
+    functions, views, sequences and partition schemes.
+  - `adapters/sqlserver/query_runner.py`: count, sample, identity, table counts,
+    untrusted constraints and deterministic dataset digest.
+  - `adapters/sqlserver/writer.py`: `pyodbc` `fast_executemany`, identity insert,
+    FK-aware delete order and reseed.
+  - `adapters/sqlserver/sql_executor.py` for repair statements.
+  - Registered as `--dialect sqlserver`; the optional dependency is
+    `pgproof[sqlserver]`.
+- Integration tests gated by `PGPROOF_MSSQL_DSN` for source verification and
+  generation.
+- T-SQL dialect contract tests (rendering, types, scripts) that run without a
+  SQL Server instance.
+
+### Known gaps in 0.9.0
+
+- T-SQL dump loading is a clear `NotImplementedError`; use a live connection.
+- SQL Server profiling is a clear `NotImplementedError`.
+- SQL Server integration has not run in this environment; it is exercised when
+  `PGPROOF_MSSQL_DSN` is set.
+- SQL Server partitioning is inventoried as raw objects, not mapped to the
+  partition tree yet.
+
+### Measured
+
+- 140 tests collected; 138 pass locally and 2 SQL Server integration tests skip
+  without a DSN.
+
 ## [0.8.0] — 2026-11-11
 
 ### Added

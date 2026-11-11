@@ -79,15 +79,14 @@ The order is deliberate: each phase is funded by the previous one.
 - Dialect-aware invariant SQL, SQL export and report label.
 - Architecture guard against PostgreSQL SQL in the core.
 
-## v0.9 — SQL Server (months 4–6)
+## v0.9 — SQL Server (source-first, delivered experimentally in 0.9.0)
 
-Only if two paying customers request it in writing.
-
-- `synthadapters.mssql`: catalog introspection (`sys.*`), `BULK INSERT`, identity
-  handling, `SET IDENTITY_INSERT`.
+- `sys.*` introspection, T-SQL dialect, query runner, writer and executor.
 - SQL Server as a **source** for migration validation.
-- SQL Server as a **target** for generation.
+- SQL Server as a **target** for generation and repair.
 - Same invariant model, same report.
+- Pending: T-SQL dump loader, profiler, partition tree, full integration run
+  against a real instance, and `BULK INSERT`.
 
 ## v0.10 — Other dialects (months 7–9)
 

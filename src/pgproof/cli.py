@@ -103,6 +103,16 @@ def _adapter(name: str) -> DatabaseAdapter:
         raise typer.BadParameter(str(exc), param_hint="--dialect") from exc
 
 
+def _connect(adapter: DatabaseAdapter, dsn: str):
+    try:
+        return adapter.connect(dsn)
+    except Exception as exc:
+        raise typer.BadParameter(
+            f"could not connect with the {adapter.name} adapter: {exc}",
+            param_hint="--dsn",
+        ) from exc
+
+
 def _dialect(name: str) -> SqlDialect:
     return _adapter(name).dialect
 
@@ -118,7 +128,7 @@ def _introspect(
     include: str | None = None,
     exclude: str | None = None,
 ) -> Catalog:
-    with adapter.connect(dsn) as conn:
+    with _connect(adapter, dsn) as conn:
         catalog = adapter.introspect(conn)
     catalog = _apply_filters(catalog, schema, include, exclude)
     semantic_for_catalog(catalog)
@@ -142,9 +152,11 @@ def _load_catalog(
         return catalog
     if schema_file:
         sql = Path(schema_file).read_text(encoding="utf-8")
-        catalog = _apply_filters(
-            adapter.ddl_loader.load(sql), schema, include, exclude
-        )
+        try:
+            raw = adapter.ddl_loader.load(sql)
+        except NotImplementedError as exc:
+            raise typer.BadParameter(str(exc), param_hint="--dialect") from exc
+        catalog = _apply_filters(raw, schema, include, exclude)
         semantic_for_catalog(catalog)
         return catalog
     if dsn is None:
@@ -255,9 +267,13 @@ def load_dump_cmd(
 ) -> None:
     """Load a schema dump (.sql) and save the catalog as JSON."""
     loader = _ddl_loader(dialect)
-    catalog = _apply_filters(
-        loader.load(file.read_text(encoding="utf-8")), schema, include, exclude
-    )
+    try:
+        catalog = _apply_filters(
+            loader.load(file.read_text(encoding="utf-8")), schema, include, exclude
+        )
+    except NotImplementedError as exc:
+        _fail(str(exc))
+        return
     semantic_for_catalog(catalog)
     payload = catalog.to_dict()
     payload["creation_order"] = to_plain(creation_order(catalog))
@@ -447,14 +463,18 @@ def profile_cmd(
     adapter = _adapter(dialect)
     dsn_value = _dsn(dsn, dsn_env)
     catalog = _introspect(adapter, dsn_value, schema, include, exclude)
-    with adapter.connect(dsn_value) as connection:
-        profile = adapter.profile(
-            connection,
-            catalog.tables,
-            sample=sample,
-            method=sample_method,
-            seed=sample_seed,
-        )
+    with _connect(adapter, dsn_value) as connection:
+        try:
+            profile = adapter.profile(
+                connection,
+                catalog.tables,
+                sample=sample,
+                method=sample_method,
+                seed=sample_seed,
+            )
+        except NotImplementedError as exc:
+            _fail(str(exc))
+            return
     if no_values:
         for table in profile.tables.values():
             for column_stats in table.columns.values():
@@ -514,7 +534,7 @@ def generate_cmd(
         writer = SqlFileWriter(sql_out, adapter.dialect, truncate=truncate_first)
     else:
         assert target_dsn is not None
-        writer = adapter.writer(adapter.connect(target_dsn))
+        writer = adapter.writer(_connect(adapter, target_dsn))
     use_case = GenerateDataset(
         catalog,
         writer,
@@ -572,7 +592,7 @@ def verify_cmd(
     """Verify every invariant against the target database."""
     adapter = _adapter(dialect)
     target_dsn = _dsn(dsn, dsn_env)
-    connection = adapter.connect(target_dsn)
+    connection = _connect(adapter, target_dsn)
     try:
         catalog = _load_catalog(
             catalog_path, target_dsn, schema, include, exclude, schema_file, dialect
@@ -653,7 +673,7 @@ def run_cmd(
         json.dumps(catalog.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
-    connection = adapter.connect(target_dsn)
+    connection = _connect(adapter, target_dsn)
     writer = adapter.writer(connection)
     generate = GenerateDataset(
         catalog,

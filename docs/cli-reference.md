@@ -45,14 +45,18 @@ Patterns are shell globs. `billing.*` matches every table in `billing`;
 
 ### Dialects
 
-`--dialect` selects the SQL renderer and the DDL loader. Only `postgres` is
-implemented today; any other name fails with the list of available dialects.
-The extension point is documented in [`architecture.md`](architecture.md).
+`--dialect` selects the SQL renderer and the DDL loader. `postgres` is fully
+implemented; `sqlserver` is experimental and source-first. It needs the optional
+driver:
 
 ```bash
-pgproof verify --dialect postgres --dsn-env PGPROOF_TARGET_DSN
-pgproof load-dump --dialect postgres db/schema.sql -o catalog.json
+pip install "pgproof[sqlserver]"
+pgproof verify --dialect sqlserver --dsn-env PGPROOF_MSSQL_DSN
+pgproof generate --dialect sqlserver --dsn-env PGPROOF_TARGET_DSN
 ```
+
+T-SQL dump loading and SQL Server profiling are not implemented yet. The
+extension point is documented in [`architecture.md`](architecture.md).
 
 ### Exit codes
 

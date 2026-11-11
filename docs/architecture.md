@@ -471,7 +471,35 @@ To add a dialect:
    scripts and repair.
 
 The CLI exposes `--dialect`; unknown names fail with the available list. Only
-`postgres` is implemented today.
+`postgres` and `sqlserver` (experimental) are implemented today.
+
+### SQL Server adapter (experimental)
+
+`adapters/sqlserver/` implements:
+
+- `dialect.py`: `[brackets]`, `N'...'` literals, type mapping, `COUNT_BIG`,
+  `TOP`, `WHERE NOT (...)`, scripts (`SET XACT_ABORT`, `SET IDENTITY_INSERT`,
+  `DBCC CHECKIDENT`, FK-ordered `DELETE`).
+- `introspect.py`: `sys.tables`, `sys.columns`, `sys.indexes`,
+  `sys.foreign_keys`, `sys.check_constraints`, `sys.triggers`,
+  `sys.sql_modules`, `sys.sequences` and partition schemes.
+- `query_runner.py`: counts, samples, untrusted constraints, table counts and
+  deterministic digest.
+- `writer.py`: `pyodbc` `fast_executemany`, identity insert, reseed.
+- `sql_executor.py`: repair statements.
+
+It is source-first. T-SQL dump loading and profiling raise a clear
+`NotImplementedError`. The driver is optional:
+
+```bash
+pip install "pgproof[sqlserver]"
+pgproof verify --dialect sqlserver --dsn-env PGPROOF_MSSQL_DSN
+```
+
+`Capabilities` for SQL Server: `exclusion_constraints=False`,
+`native_ranges=False`, `native_enums=False`, `partition_model="scheme"`,
+`row_identity="pk"`, `bulk_method="batch"`, `filtered_indexes=True`,
+`temporal_tables=True`.
 
 ## Security
 

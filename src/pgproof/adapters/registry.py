@@ -18,6 +18,14 @@ from .postgres.profile import profile_catalog
 from .postgres.query_runner import PostgresQueryRunner
 from .postgres.sql_executor import PostgresSqlExecutor
 from .postgres.writer import PostgresRowWriter
+from .sqlserver.dialect import SqlServerDialect
+from .sqlserver.dump import SqlServerDdlLoader
+from .sqlserver.introspect import connect as sqlserver_connect
+from .sqlserver.introspect import introspect as sqlserver_introspect
+from .sqlserver.profile import profile_catalog as sqlserver_profile
+from .sqlserver.query_runner import SqlServerQueryRunner
+from .sqlserver.sql_executor import SqlServerSqlExecutor
+from .sqlserver.writer import SqlServerRowWriter
 
 
 def _postgres_adapter() -> DatabaseAdapter:
@@ -34,8 +42,23 @@ def _postgres_adapter() -> DatabaseAdapter:
     )
 
 
+def _sqlserver_adapter() -> DatabaseAdapter:
+    return DatabaseAdapter(
+        name="sqlserver",
+        dialect=SqlServerDialect(),
+        ddl_loader=SqlServerDdlLoader(),
+        connect=sqlserver_connect,
+        introspect=sqlserver_introspect,
+        writer=SqlServerRowWriter,
+        query_runner=SqlServerQueryRunner,
+        executor=SqlServerSqlExecutor,
+        profiler=sqlserver_profile,
+    )
+
+
 _ADAPTERS: dict[str, Callable[[], DatabaseAdapter]] = {
     "postgres": _postgres_adapter,
+    "sqlserver": _sqlserver_adapter,
 }
 
 
